@@ -15,7 +15,6 @@ from . import schema
 from .normalize import (
     clean_whitespace,
     collapse_line,
-    guess_country_from_address,
     looks_masked,
     normalize_date,
 )
@@ -92,12 +91,6 @@ def _parse_director_block(block: str, source: str) -> dict:
         chinese_name = cjk_m.group(0) if cjk_m else ""
     surname_cn, given_cn = _split_chinese_name(chinese_name)
 
-    position = _grab_line(block, r"Capacity", r"Position", r"職位", r"职位") or "Director"
-
-    gender = _grab_line(block, r"Sex", r"Gender", r"性別", r"性别")
-
-    nationality = _grab_line(block, r"Nationality", r"國籍", r"国籍")
-
     residential_address = _grab_line(
         block, r"(?:Usual\s*)?Residential\s*Address", r"住[址所]"
     )
@@ -118,12 +111,6 @@ def _parse_director_block(block: str, source: str) -> dict:
     dob_raw = _grab_line(block, r"Date\s*of\s*Birth", r"出生日期")
     dob, dob_raw_clean = normalize_date(dob_raw) if dob_raw else ("", None)
 
-    residing_country = guess_country_from_address(residential_address)
-    same_nationality = bool(
-        nationality and residing_country
-        and nationality.strip().lower() == residing_country.strip().lower()
-    )
-
     id_status = schema.STATUS_MISSING
     if id_info:
         id_status = schema.STATUS_MASKED if looks_masked(id_info) else schema.STATUS_EXTRACTED
@@ -133,17 +120,6 @@ def _parse_director_block(block: str, source: str) -> dict:
         "given_cn": schema.extracted(given_cn, source) if given_cn else schema.missing(),
         "surname_en": schema.extracted(surname_en, source) if surname_en else schema.missing(),
         "given_en": schema.extracted(given_en, source) if given_en else schema.missing(),
-        "position": schema.extracted(position, source),
-        "gender": schema.extracted(gender, source) if gender else schema.missing(),
-        "nationality": schema.extracted(nationality, source) if nationality else schema.missing(),
-        "residing_country": (
-            schema.inferred(residing_country, "派生") if residing_country else schema.missing()
-        ),
-        "same_nationality": (
-            schema.field("是" if same_nationality else "否", "派生", schema.STATUS_INFERRED)
-            if (nationality and residing_country)
-            else schema.missing()
-        ),
         "residential_address": (
             schema.extracted(residential_address, source) if residential_address else schema.missing()
         ),

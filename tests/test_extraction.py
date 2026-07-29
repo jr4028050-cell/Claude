@@ -127,15 +127,19 @@ def test_nnc1():
     assert d1["given_en"]["value"] == "TAI MAN", d1["given_en"]
     assert d1["surname_cn"]["value"] == "陳", d1["surname_cn"]
     assert d1["given_cn"]["value"] == "大文", d1["given_cn"]
-    assert d1["nationality"]["value"] == "Chinese", d1["nationality"]
-    assert d1["residing_country"]["value"] == "Hong Kong", d1["residing_country"]
+    assert d1["residential_address"]["value"] == (
+        "ROOM 5, 10/F, XYZ MANSION, KOWLOON, HONG KONG"
+    ), d1["residential_address"]
+    assert d1["id_info"]["value"] == "P1234567(HK)", d1["id_info"]
     assert d1["id_info"]["status"] == "extracted", d1["id_info"]
     assert d1["dob"]["value"] == "1980-01-01", d1["dob"]
+    for removed_key in ("position", "gender", "nationality", "residing_country", "same_nationality"):
+        assert removed_key not in d1, f"{removed_key} should no longer be extracted"
 
     d2 = r["directors"][1]
     assert d2["surname_en"]["value"] == "WONG", d2["surname_en"]
+    assert d2["id_info"]["value"] == "K98****", d2["id_info"]
     assert d2["id_info"]["status"] == "masked", d2["id_info"]
-    assert d2["residing_country"]["value"] != "Hong Kong"
     print("test_nnc1 OK", r)
 
 
