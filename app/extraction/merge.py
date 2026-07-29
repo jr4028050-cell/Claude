@@ -23,12 +23,21 @@ def _norm_key(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().upper())
 
 
-def _field_count_filled(director: dict) -> int:
-    return sum(1 for f in director.values() if f.get("value"))
+def _field_count_filled(record: dict) -> int:
+    return sum(1 for f in record.values() if isinstance(f, dict) and f.get("value"))
 
 
 def _director_key(director: dict) -> str:
     return _norm_key(director["surname_en"]["value"]) + "|" + _norm_key(director["given_en"]["value"])
+
+
+def _ubo_key(ubo: dict) -> str:
+    if ubo.get("is_corporate"):
+        name = _norm_key(ubo["company_name"]["value"])
+        return f"CORP|{name}" if name else ""
+    surname = _norm_key(ubo["surname_en"]["value"])
+    given = _norm_key(ubo["given_en"]["value"])
+    return f"PERSON|{surname}|{given}" if (surname or given) else ""
 
 
 def _pick_reg_address(
@@ -110,6 +119,33 @@ def _merge_directors(nnc1_sources: list[NNC1Source]) -> list[dict]:
     return [merged[k] for k in order]
 
 
+def _merge_ubos(nnc1_sources: list[NNC1Source]) -> list[dict]:
+    """Merge UBO entries (already computed per-file, including their
+    shareholding_pct) across all NNC1/NAR1 files. Same person/company
+    matched across files keeps whichever record is more complete,
+    preferring the newest NAR1 on ties — mirrors _merge_directors.
+    """
+    ordered = sorted(
+        [s for s in nnc1_sources if s.doc_kind != "NAR1"], key=lambda s: s.recency_key
+    ) + sorted(
+        [s for s in nnc1_sources if s.doc_kind == "NAR1"], key=lambda s: s.recency_key
+    )
+
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for source in ordered:
+        for ubo in source.data.get("ubos", []):
+            key = _ubo_key(ubo)
+            if not key:
+                continue
+            existing = merged.get(key)
+            if existing is None or _field_count_filled(ubo) >= _field_count_filled(existing):
+                merged[key] = ubo
+            if key not in order:
+                order.append(key)
+    return [merged[k] for k in order]
+
+
 def merge(
     ci_files: list[tuple[str, dict]],
     br_files: list[tuple[str, dict]],
@@ -182,7 +218,8 @@ def merge(
         "op_address": op_address,
     }
 
-    representatives = _merge_directors(nnc1_sources)
+    directors = _merge_directors(nnc1_sources)
+    ubos = _merge_ubos(nnc1_sources)
 
     files = (
         [f for f, _ in ci_files]
@@ -192,7 +229,8 @@ def merge(
 
     return {
         "enterprise": enterprise,
-        "representatives": representatives,
+        "directors": directors,
+        "ubos": ubos,
         "conflicts": conflicts,
         "files": files,
     }

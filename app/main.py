@@ -124,7 +124,8 @@ async def extract(
     if not ci_results and not br_results and not nnc1_sources:
         return {
             "enterprise": {},
-            "representatives": [],
+            "directors": [],
+            "ubos": [],
             "conflicts": [],
             "files": [],
             "warnings": ["未收到任何文件"],

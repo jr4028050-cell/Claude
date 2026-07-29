@@ -14,6 +14,7 @@
     --warn:#b25e00;--warn-soft:#fbf0e0;
     --miss:#c0392b;--miss-soft:#fbeae8;
     --manual:#6b5bd6;--manual-soft:#efecfc;
+    --na:#8b929c;--na-soft:#eef0f3;
     --mono:"SF Mono",ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace;
     --sans:"Inter","PingFang HK","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,sans-serif;
   }
@@ -77,6 +78,7 @@
   .dot{width:8px;height:8px;border-radius:2px;display:inline-block}
   .d-ok{background:var(--ok)}.d-def{background:var(--accent)}
   .d-warn{background:var(--warn)}.d-miss{background:var(--miss)}.d-man{background:var(--manual)}
+  .d-na{background:var(--na)}
 
   .sect{padding:6px 20px 4px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
     text-transform:uppercase;color:var(--ink-3);background:var(--panel);
@@ -101,6 +103,7 @@
   .val input:hover{border-color:var(--line)}
   .val input:focus{outline:none;border-color:var(--accent);background:var(--accent-soft)}
   .val input.empty{background:var(--miss-soft)}
+  .val input.na{background:var(--na-soft);color:var(--ink-3)}
   .src{width:150px}
   .badge{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:2px 8px;
     border-radius:20px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
@@ -109,6 +112,7 @@
   .b-warn{background:var(--warn-soft);color:var(--warn)}
   .b-miss{background:var(--miss-soft);color:var(--miss)}
   .b-man{background:var(--manual-soft);color:var(--manual)}
+  .b-na{background:var(--na-soft);color:var(--na)}
   .from{font-family:var(--mono);font-size:11px;color:var(--ink-3);width:90px}
 
   .rep-card{border:1px solid var(--line);border-radius:8px;margin:14px 20px;overflow:hidden}
@@ -116,6 +120,10 @@
     border-bottom:1px solid var(--line-2)}
   .rep-top b{font-size:13px}
   .primary-pick{margin-left:auto;font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+  .pct-chip{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--accent);
+    background:var(--accent-soft);border-radius:20px;padding:2px 9px}
+  .corp-chip{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--ink-3);
+    background:var(--line-2);border-radius:4px;padding:2px 7px;letter-spacing:.05em}
 
   .exports{display:flex;gap:10px;padding:18px 20px;border-top:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
   .exports .btn-2{display:inline-flex;align-items:center;gap:7px}
@@ -172,7 +180,7 @@
 
     <div class="zone">
       <div class="zone-h"><span class="tag">NNC1 / NAR1</span><b>成立表格 / 周年申报</b></div>
-      <p>提供注册地址与董事/代表个人信息。可多份，取最新。</p>
+      <p>提供注册地址、董事个人信息、股权结构（用于计算 UBO）。可多份，取最新。</p>
       <div class="drop" id="drop-nnc1">
         <div class="ic">↑</div>
         <div class="t"><b>点击上传</b> 或拖入 PDF</div>
@@ -214,6 +222,7 @@
         <span><i class="dot d-warn"></i>遮蔽</span>
         <span><i class="dot d-miss"></i>缺失待补</span>
         <span><i class="dot d-man"></i>人工填写</span>
+        <span><i class="dot d-na"></i>不适用</span>
       </div>
     </div>
 
@@ -223,8 +232,11 @@
     <div class="sect">企业信息</div>
     <table><tbody id="ent"></tbody></table>
 
-    <div class="sect">企业代表</div>
-    <div id="reps"></div>
+    <div class="sect">企业代表（董事）</div>
+    <div id="directors"></div>
+
+    <div class="sect">UBO（最终受益人，持股 ≥ 25%）</div>
+    <div id="ubos"></div>
 
     <div class="exports">
       <button class="btn-2" onclick="exportJSON()">⤓ 导出 JSON</button>
@@ -349,15 +361,23 @@
     ['op_country', '经营国家', true],
     ['op_address', '经营详细地址', true],
   ];
-  const REP_FIELDS = [
-    ['surname_cn', '代表姓氏（中文）', true],
-    ['given_cn', '名字（中文）', true],
+  const DIRECTOR_FIELDS = [
+    ['surname_cn', '姓氏（中文）', false],
+    ['given_cn', '名字（中文）', false],
     ['surname_en', '英文姓氏', true],
     ['given_en', '英文名字', true],
     ['residential_address', '居住地址', true],
-    ['id_issuing_country', '证件签发国家', true],
-    ['dob', '出生日期', true],
     ['id_info', '证件信息', true],
+  ];
+  const UBO_FIELDS = [
+    ['surname_cn', '姓氏（中文）', false],
+    ['given_cn', '名字（中文）', false],
+    ['surname_en', '英文姓氏', false],
+    ['given_en', '英文名字', false],
+    ['company_name', '公司名称（法人股东）', false],
+    ['residential_address', '居住地址', false],
+    ['id_info', '证件信息', false],
+    ['shareholding_pct', '持股比例', true],
   ];
   const BADGE = {
     extracted: ['b-ok', '已提取'],
@@ -366,17 +386,19 @@
     masked: ['b-warn', '遮蔽'],
     missing: ['b-miss', '缺失'],
     manual: ['b-man', '人工填写'],
+    na: ['b-na', '不适用'],
   };
 
   function fieldRow(scope, idx, key, label, required, f) {
     f = f || { value: '', source: '', status: 'missing' };
-    const empty = (!f.value) ? 'empty' : '';
+    const naCls = f.status === 'na' ? 'na' : '';
+    const empty = (!f.value && f.status !== 'na') ? 'empty' : '';
     const b = BADGE[f.status] || BADGE.missing;
     return `<tr>
       <td class="fld">${escapeHtml(label)}${required ? '<span class="req">*</span>' : ''}</td>
-      <td class="val"><input class="${empty}" data-scope="${scope}" data-idx="${idx}" data-key="${key}"
+      <td class="val"><input class="${empty} ${naCls}" data-scope="${scope}" data-idx="${idx}" data-key="${key}"
         value="${escapeHtml(f.value)}"
-        placeholder="${f.status === 'missing' ? '待人工补录' : ''}"></td>
+        placeholder="${f.status === 'missing' ? '待人工补录' : (f.status === 'na' ? '不适用' : '')}"></td>
       <td class="src"><span class="badge ${b[0]}" data-badge-for="${scope}-${idx}-${key}">${b[1]}</span></td>
       <td class="from">${escapeHtml(f.source) || '—'}</td></tr>`;
   }
@@ -399,21 +421,38 @@
     document.getElementById('ent').innerHTML = ENT_FIELDS
       .map(([key, label, req]) => fieldRow('ent', 0, key, label, req, ent[key])).join('');
 
-    const reps = data.representatives || [];
-    document.getElementById('reps').innerHTML = reps.map((rep, i) => {
-      const name = [rep.given_en && rep.given_en.value, rep.surname_en && rep.surname_en.value]
-        .filter(Boolean).join(' ') || `代表 ${i + 1}`;
-      const rows = REP_FIELDS.map(([key, label, req]) => fieldRow('rep', i, key, label, req, rep[key])).join('');
+    const directors = data.directors || [];
+    document.getElementById('directors').innerHTML = directors.map((d, i) => {
+      const name = [d.given_en && d.given_en.value, d.surname_en && d.surname_en.value]
+        .filter(Boolean).join(' ') || `董事 ${i + 1}`;
+      const rows = DIRECTOR_FIELDS.map(([key, label, req]) => fieldRow('director', i, key, label, req, d[key])).join('');
       return `<div class="rep-card">
-        <div class="rep-top"><b>代表 ${i + 1} · ${escapeHtml(name)}</b>
+        <div class="rep-top"><b>董事 ${i + 1} · ${escapeHtml(name)}</b>
           <label class="primary-pick"><input type="radio" name="primary-rep" value="${i}" ${i === 0 ? 'checked' : ''}> 设为主代表</label>
         </div>
         <table><tbody>${rows}</tbody></table>
       </div>`;
-    }).join('') || `<div style="padding:20px;color:var(--ink-3);font-size:13px">未从 NNC1/NAR1 中识别到代表信息，请人工补录。</div>`;
+    }).join('') || `<div style="padding:20px;color:var(--ink-3);font-size:13px">未从 NNC1/NAR1 中识别到董事信息，请人工补录。</div>`;
+
+    const ubos = data.ubos || [];
+    document.getElementById('ubos').innerHTML = ubos.map((u, i) => {
+      const name = u.is_corporate
+        ? (u.company_name && u.company_name.value) || `UBO ${i + 1}`
+        : [u.given_en && u.given_en.value, u.surname_en && u.surname_en.value].filter(Boolean).join(' ') || `UBO ${i + 1}`;
+      const pct = (u.shareholding_pct && u.shareholding_pct.value) || '比例待补';
+      const rows = UBO_FIELDS.map(([key, label, req]) => fieldRow('ubo', i, key, label, req, u[key])).join('');
+      return `<div class="rep-card">
+        <div class="rep-top">
+          <b>UBO ${i + 1} · ${escapeHtml(name)}</b>
+          <span class="corp-chip">${u.is_corporate ? '法人股东' : '自然人'}</span>
+          <span class="pct-chip" style="margin-left:auto">${escapeHtml(pct)}</span>
+        </div>
+        <table><tbody>${rows}</tbody></table>
+      </div>`;
+    }).join('') || `<div style="padding:20px;color:var(--ink-3);font-size:13px">未从 NNC1/NAR1 中识别到持股 ≥25% 的股东，请人工补录或确认股权结构。</div>`;
 
     // wire up edit handlers
-    document.querySelectorAll('#ent input, #reps input[data-scope]').forEach(input => {
+    document.querySelectorAll('#ent input, #directors input[data-scope], #ubos input[data-scope]').forEach(input => {
       input.addEventListener('input', onFieldEdit);
     });
   }
@@ -421,18 +460,20 @@
   function onFieldEdit(e) {
     const { scope, idx, key } = e.target.dataset;
     const i = Number(idx);
-    const container = scope === 'ent' ? lastResult.enterprise : lastResult.representatives[i];
+    const listByScope = { director: 'directors', ubo: 'ubos' };
+    const container = scope === 'ent' ? lastResult.enterprise : lastResult[listByScope[scope]][i];
     if (!container[key]) container[key] = { value: '', source: '', status: 'missing' };
     const f = container[key];
     const newVal = e.target.value;
     const wasEmpty = !f.value;
     f.value = newVal;
-    if (newVal && (f.status === 'missing' || f.status === 'masked')) {
+    if (newVal && (f.status === 'missing' || f.status === 'masked' || f.status === 'na')) {
       f.status = 'manual';
     } else if (!newVal && wasEmpty === false) {
       f.status = 'missing';
     }
     e.target.classList.toggle('empty', !newVal);
+    e.target.classList.remove('na');
     const badgeEl = document.querySelector(`[data-badge-for="${scope}-${idx}-${key}"]`);
     if (badgeEl) {
       const b = BADGE[f.status] || BADGE.missing;
@@ -460,7 +501,7 @@
     if (!lastResult) { alert('请先完成提取'); return; }
     const payload = {
       ...lastResult,
-      representatives: lastResult.representatives.map((r, i) => ({ ...r, is_primary: i === primaryRepIndex() })),
+      directors: lastResult.directors.map((d, i) => ({ ...d, is_primary: i === primaryRepIndex() })),
     };
     downloadBlob(JSON.stringify(payload, null, 2), 'hk_extract_result.json', 'application/json');
   }
@@ -496,14 +537,25 @@
     );
     lines.push('');
 
-    lines.push('企业代表');
-    lines.push(['序号', '主代表'].concat(REP_FIELDS.map(([, label]) => label)).concat('status备注')
+    lines.push('企业代表（董事）');
+    lines.push(['序号', '主代表'].concat(DIRECTOR_FIELDS.map(([, label]) => label)).concat('status备注')
       .map(csvEscape).join(','));
     const primary = primaryRepIndex();
-    (lastResult.representatives || []).forEach((rep, i) => {
+    (lastResult.directors || []).forEach((d, i) => {
       const row = [i + 1, i === primary ? '是' : '']
-        .concat(REP_FIELDS.map(([key]) => (rep[key] && rep[key].value) || ''))
-        .concat(statusNote(rep, REP_FIELDS.map(([k, l]) => [k, l])));
+        .concat(DIRECTOR_FIELDS.map(([key]) => (d[key] && d[key].value) || ''))
+        .concat(statusNote(d, DIRECTOR_FIELDS.map(([k, l]) => [k, l])));
+      lines.push(row.map(csvEscape).join(','));
+    });
+    lines.push('');
+
+    lines.push('UBO（最终受益人，持股 ≥25%）');
+    lines.push(['序号', '类型'].concat(UBO_FIELDS.map(([, label]) => label)).concat('status备注')
+      .map(csvEscape).join(','));
+    (lastResult.ubos || []).forEach((u, i) => {
+      const row = [i + 1, u.is_corporate ? '法人股东' : '自然人']
+        .concat(UBO_FIELDS.map(([key]) => (u[key] && u[key].value) || ''))
+        .concat(statusNote(u, UBO_FIELDS.map(([k, l]) => [k, l])));
       lines.push(row.map(csvEscape).join(','));
     });
 

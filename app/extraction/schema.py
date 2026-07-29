@@ -13,6 +13,7 @@ STATUS_DEFAULT = "default"
 STATUS_INFERRED = "inferred"
 STATUS_MASKED = "masked"
 STATUS_MISSING = "missing"
+STATUS_NA = "na"  # field does not apply to this row (e.g. ID/address for a corporate UBO)
 
 
 def field(
@@ -49,3 +50,7 @@ def masked(value: str, source: str, raw: Optional[str] = None) -> dict[str, Any]
 
 def missing() -> dict[str, Any]:
     return field("", "", STATUS_MISSING)
+
+
+def na() -> dict[str, Any]:
+    return field("", "", STATUS_NA)

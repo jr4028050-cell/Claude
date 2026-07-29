@@ -59,6 +59,25 @@ Capacity: Director
 Nationality: British
 Usual Residential Address: 20 BAKER STREET, LONDON, UNITED KINGDOM
 Identification: K98****
+
+Particulars of Founder Members and Shares Taken
+Surname or Company Name: CHAN
+Forename(s): TAI MAN
+Number of Shares Taken: 6000
+
+Surname or Company Name: WONG
+Forename(s): MEI LING
+Number of Shares Taken: 2500
+
+Surname or Company Name: LI
+Forename(s): SIU MING
+Number of Shares Taken: 1500
+
+Name of Corporation: SMALLCO HOLDINGS LIMITED
+Number of Shares Taken: 0
+
+Share Capital and Initial Shareholdings
+Total Number of Shares Proposed to be Issued: 10000
 """
 
 
@@ -221,15 +240,77 @@ def test_nnc1():
     ), d1["residential_address"]
     assert d1["id_info"]["value"] == "P1234567(HK)", d1["id_info"]
     assert d1["id_info"]["status"] == "extracted", d1["id_info"]
-    assert d1["dob"]["value"] == "1980-01-01", d1["dob"]
-    for removed_key in ("position", "gender", "nationality", "residing_country", "same_nationality"):
+    for removed_key in (
+        "position", "gender", "nationality", "residing_country", "same_nationality",
+        "dob", "id_issuing_country",
+    ):
         assert removed_key not in d1, f"{removed_key} should no longer be extracted"
 
     d2 = r["directors"][1]
     assert d2["surname_en"]["value"] == "WONG", d2["surname_en"]
     assert d2["id_info"]["value"] == "K98****", d2["id_info"]
     assert d2["id_info"]["status"] == "masked", d2["id_info"]
-    print("test_nnc1 OK", r)
+    print("test_nnc1 OK directors", r["directors"])
+
+    # UBOs: CHAN 6000/10000=60% and WONG 2500/10000=25% qualify (>=25%);
+    # LI 1500/10000=15% and the 0-share corporate holder do not.
+    assert len(r["ubos"]) == 2, r["ubos"]
+    ubo_by_name = {u["surname_en"]["value"]: u for u in r["ubos"]}
+    assert ubo_by_name["CHAN"]["shareholding_pct"]["value"] == "60.00%", ubo_by_name["CHAN"]
+    assert ubo_by_name["CHAN"]["residential_address"]["value"] == (
+        "ROOM 5, 10/F, XYZ MANSION, KOWLOON, HONG KONG"
+    ), ubo_by_name["CHAN"]  # backfilled from the director record
+    assert ubo_by_name["CHAN"]["id_info"]["value"] == "P1234567(HK)", ubo_by_name["CHAN"]
+    assert ubo_by_name["WONG"]["shareholding_pct"]["value"] == "25.00%", ubo_by_name["WONG"]
+    assert ubo_by_name["WONG"]["id_info"]["status"] == "masked", ubo_by_name["WONG"]
+    print("test_nnc1 OK ubos", r["ubos"])
+
+
+def test_nnc1_corporate_ubo():
+    text = """
+    Registered Office:
+    FLAT B, HONG KONG
+
+    Particulars of Founder Members and Shares Taken
+    Name of Corporation: BIG HOLDINGS LIMITED
+    Number of Shares Taken: 4000
+
+    Surname or Company Name: LEE
+    Forename(s): KA WING
+    Number of Shares Taken: 500
+
+    Share Capital
+    Total Number of Shares Proposed to be Issued: 10000
+    """
+    r = nnc1_rules.extract_nnc1(text, source="NNC1")
+    assert len(r["ubos"]) == 1, r["ubos"]  # LEE at 5% is below threshold
+    ubo = r["ubos"][0]
+    assert ubo["is_corporate"] is True, ubo
+    assert ubo["company_name"]["value"] == "BIG HOLDINGS LIMITED", ubo
+    assert ubo["shareholding_pct"]["value"] == "40.00%", ubo
+    assert ubo["id_info"]["status"] == "na", ubo
+    assert ubo["residential_address"]["status"] == "na", ubo
+    assert ubo["surname_en"]["status"] == "na", ubo
+    print("test_nnc1_corporate_ubo OK", ubo)
+
+
+def test_nnc1_ubo_unknown_total_flags_missing_pct():
+    """No total-shares figure in the document -> can't compute the ratio,
+    so shareholders are still surfaced (not silently dropped) but with
+    shareholding_pct marked 'missing' for manual completion."""
+    text = """
+    Registered Office:
+    FLAT B, HONG KONG
+
+    Particulars of Founder Members and Shares Taken
+    Surname or Company Name: LEE
+    Forename(s): KA WING
+    Number of Shares Taken: 500
+    """
+    r = nnc1_rules.extract_nnc1(text, source="NNC1")
+    assert len(r["ubos"]) == 1, r["ubos"]
+    assert r["ubos"][0]["shareholding_pct"]["status"] == "missing", r["ubos"][0]
+    print("test_nnc1_ubo_unknown_total_flags_missing_pct OK", r["ubos"][0])
 
 
 def test_normalize_date_variants():
@@ -262,9 +343,58 @@ def test_merge():
     assert ent["op_address"]["value"] == br["business_address"]["value"]
     assert len(result["conflicts"]) == 1
     assert result["conflicts"][0]["field"] == "enterprise.reg_address"
-    assert len(result["representatives"]) == 2
+    assert len(result["directors"]) == 2
+    assert len(result["ubos"]) == 2
     assert result["files"] == ["CI.pdf", "BR.pdf", "NNC1.pdf"]
     print("test_merge OK", ent, result["conflicts"])
+
+
+def test_merge_ubo_dedup_across_nnc1_and_nar1():
+    """Same UBO listed in both an NNC1 and a later NAR1 should be merged
+    into one entry, preferring the newer NAR1 on ties/completeness."""
+    nnc1_text = """
+    Registered Office:
+    FLAT B, HONG KONG
+
+    Particulars of Founder Members and Shares Taken
+    Surname or Company Name: CHAN
+    Forename(s): TAI MAN
+    Number of Shares Taken: 6000
+
+    Share Capital
+    Total Number of Shares Proposed to be Issued: 10000
+    """
+    nar1_text = """
+    Annual Return
+    made up to 15 March 2025
+    Registered Office:
+    FLAT B, HONG KONG
+
+    Particulars of Founder Members and Shares Taken
+    Surname or Company Name: CHAN
+    Forename(s): TAI MAN
+    Usual Residential Address: ROOM 5, KOWLOON, HONG KONG
+    Identification: P1234567(HK)
+    Number of Shares Taken: 6000
+
+    Share Capital
+    Total Number of Shares Proposed to be Issued: 10000
+    """
+    nnc1_data = nnc1_rules.extract_nnc1(nnc1_text, source="NNC1")
+    nar1_data = nnc1_rules.extract_nnc1(nar1_text, source="NAR1")
+    result = merge(
+        ci_files=[],
+        br_files=[],
+        nnc1_sources=[
+            NNC1Source(filename="NNC1.pdf", doc_kind="NNC1", data=nnc1_data, recency_key="0000-00-00"),
+            NNC1Source(filename="NAR1.pdf", doc_kind="NAR1", data=nar1_data, recency_key="2025-03-15"),
+        ],
+    )
+    assert len(result["ubos"]) == 1, result["ubos"]
+    ubo = result["ubos"][0]
+    assert ubo["shareholding_pct"]["value"] == "60.00%", ubo
+    assert ubo["residential_address"]["value"] == "ROOM 5, KOWLOON, HONG KONG", ubo
+    print("test_merge_ubo_dedup_across_nnc1_and_nar1 OK", ubo)
 
 
 def test_endpoint_smoke():
@@ -298,7 +428,8 @@ def test_endpoint_smoke():
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["enterprise"]["crn"]["value"] == "3012345", data["enterprise"]
-    assert len(data["representatives"]) == 2
+    assert len(data["directors"]) == 2
+    assert len(data["ubos"]) == 2
     print("test_endpoint_smoke OK", data["enterprise"]["name_en"], data["enterprise"]["crn"])
 
 
@@ -311,7 +442,10 @@ if __name__ == "__main__":
     test_br_real_form2_address_ignores_header_boilerplate()
     test_br_address_fills_both_reg_and_op_address()
     test_nnc1()
+    test_nnc1_corporate_ubo()
+    test_nnc1_ubo_unknown_total_flags_missing_pct()
     test_normalize_date_variants()
     test_merge()
+    test_merge_ubo_dedup_across_nnc1_and_nar1()
     test_endpoint_smoke()
     print("\nALL TESTS PASSED")
