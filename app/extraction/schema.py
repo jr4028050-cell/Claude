@@ -14,6 +14,7 @@ STATUS_INFERRED = "inferred"
 STATUS_MASKED = "masked"
 STATUS_MISSING = "missing"
 STATUS_NA = "na"  # field does not apply to this row (e.g. ID/address for a corporate UBO)
+STATUS_SUGGESTED = "suggested"  # machine-generated guess with no reliable ground truth (e.g. Cantonese romanization); needs human confirmation, distinct from a user's own manual edit
 
 
 def field(
@@ -54,3 +55,9 @@ def missing() -> dict[str, Any]:
 
 def na() -> dict[str, Any]:
     return field("", "", STATUS_NA)
+
+
+def suggested(value: str, source: str) -> dict[str, Any]:
+    if not value:
+        return missing()
+    return field(value, source, STATUS_SUGGESTED)

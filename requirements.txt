@@ -6,3 +6,5 @@ pdf2image==1.17.*
 pytesseract==0.3.*
 Pillow==10.*
 python-dateutil==2.9.*
+pypinyin==0.55.*
+pycantonese==5.0.*

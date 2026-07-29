@@ -15,6 +15,7 @@
     --miss:#c0392b;--miss-soft:#fbeae8;
     --manual:#6b5bd6;--manual-soft:#efecfc;
     --na:#8b929c;--na-soft:#eef0f3;
+    --suggest:#0f7b6c;--suggest-soft:#e3f5f1;
     --mono:"SF Mono",ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace;
     --sans:"Inter","PingFang HK","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,sans-serif;
   }
@@ -79,6 +80,7 @@
   .d-ok{background:var(--ok)}.d-def{background:var(--accent)}
   .d-warn{background:var(--warn)}.d-miss{background:var(--miss)}.d-man{background:var(--manual)}
   .d-na{background:var(--na)}
+  .d-sug{background:var(--suggest)}
 
   .sect{padding:6px 20px 4px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
     text-transform:uppercase;color:var(--ink-3);background:var(--panel);
@@ -113,6 +115,7 @@
   .b-miss{background:var(--miss-soft);color:var(--miss)}
   .b-man{background:var(--manual-soft);color:var(--manual)}
   .b-na{background:var(--na-soft);color:var(--na)}
+  .b-sug{background:var(--suggest-soft);color:var(--suggest)}
   .from{font-family:var(--mono);font-size:11px;color:var(--ink-3);width:90px}
 
   .rep-card{border:1px solid var(--line);border-radius:8px;margin:14px 20px;overflow:hidden}
@@ -223,6 +226,7 @@
         <span><i class="dot d-miss"></i>缺失待补</span>
         <span><i class="dot d-man"></i>人工填写</span>
         <span><i class="dot d-na"></i>不适用</span>
+        <span><i class="dot d-sug"></i>建议值·待确认</span>
       </div>
     </div>
 
@@ -368,6 +372,7 @@
     ['given_en', '英文名字', true],
     ['residential_address', '居住地址', true],
     ['id_info', '证件信息', true],
+    ['id_issuing_country', '证件签发国家/地区', false],
   ];
   const UBO_FIELDS = [
     ['surname_cn', '姓氏（中文）', false],
@@ -377,12 +382,14 @@
     ['company_name', '公司名称（法人股东）', false],
     ['residential_address', '居住地址', false],
     ['id_info', '证件信息', false],
+    ['id_issuing_country', '证件签发国家/地区', false],
     ['shareholding_pct', '持股比例', true],
   ];
   const BADGE = {
     extracted: ['b-ok', '已提取'],
     default: ['b-def', '默认值'],
     inferred: ['b-def', '推断值'],
+    suggested: ['b-sug', '建议·待确认'],
     masked: ['b-warn', '遮蔽'],
     missing: ['b-miss', '缺失'],
     manual: ['b-man', '人工填写'],
@@ -467,7 +474,7 @@
     const newVal = e.target.value;
     const wasEmpty = !f.value;
     f.value = newVal;
-    if (newVal && (f.status === 'missing' || f.status === 'masked' || f.status === 'na')) {
+    if (f.status === 'suggested' || (newVal && (f.status === 'missing' || f.status === 'masked' || f.status === 'na'))) {
       f.status = 'manual';
     } else if (!newVal && wasEmpty === false) {
       f.status = 'missing';
@@ -510,7 +517,7 @@
     const notes = [];
     labels.forEach(([key, label]) => {
       const f = fields[key];
-      if (f && (f.status === 'missing' || f.status === 'masked')) {
+      if (f && (f.status === 'missing' || f.status === 'masked' || f.status === 'suggested')) {
         notes.push(`${label}:${f.status}`);
       }
     });

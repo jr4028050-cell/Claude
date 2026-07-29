@@ -14,6 +14,7 @@ app/
     normalize.py           日期归一化、地址推断国家等工具函数
     pdf_text.py             文字层提取（pdfplumber）+ OCR fallback（pdf2image/pytesseract）
     ci.py / br.py / nnc1.py 各文件类型的正则/关键词锚定规则
+    romanize.py              中文姓名转拼音兜底（普通话拼音 / 粤语拼音建议）
     merge.py                跨文件合并、默认值、派生字段、冲突检测
 static/
   index.html               前端页面（基于 hk_extract_ui.html 原型改造，接入真实后端）
@@ -60,6 +61,20 @@ uvicorn app.main:app --reload --port 8000
 - **企业代表字段范围**：本期不提取/展示职位、性别、国籍、居住国家（这些字
   段在 NNC1/NAR1 中经常缺失或需要额外证件比对，暂不纳入）。居住地址与证件
   信息均从 NNC1/NAR1 董事个人资料区块中提取。
+- **PI-NNC1 董事详情页解析**：董事的中文姓名、英文姓氏/名字、证件号码（香
+  港身份证为 NIL 时改取护照完整号码 + 签发国家/地区）、通常住址（Flat/
+  Floor/Block、Building、Street、District/City/Province、Country 五个分栏
+  按顺序拼接）均按此页实际版式的字段标签定位取值，取值前会用一份标签黑名
+  单校验，避免捕获到空白栏位旁边的标签文字本身（如"Surname""Building"
+  "PI-NNC1"页眉等）——命中黑名单一律按缺失处理，不会用标签文字填充。
+- **英文姓名拼音兜底**：若原件英文姓名（Surname / Other Names）留空但有中
+  文姓名，会按该董事证件类型自动填充拼音建议：证件为中国大陆身份证/护照
+  （签发国 China）时，用 `pypinyin` 转普通话拼音，标记为「推断值」；证件为
+  香港身份证时，用 `pycantonese` 的粤拼再套用一份近似的"香港身份证英文拼
+  法"映射表生成建议值，标记为「建议值·待确认」（不是「推断值」）——因为香
+  港身份证英文姓名并无统一转换标准，只能作为待人工核对的建议，不可当作确
+  认值使用。两种拼音都会在导出的 JSON/CSV 中带上明确的 source/status，方便
+  区分。
 - **UBO（最终受益人）计算方式**：不直接找现成的持股比例文字，而是分别定位
   NNC1 第 5 节「Share Capital and Initial Shareholdings」Total 行的股份总数
   （分母）与「創辦成員 / Founder Members」股东名单里各股东的认购股数

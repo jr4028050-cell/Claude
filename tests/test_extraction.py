@@ -241,8 +241,7 @@ def test_nnc1():
     assert d1["id_info"]["value"] == "P1234567(HK)", d1["id_info"]
     assert d1["id_info"]["status"] == "extracted", d1["id_info"]
     for removed_key in (
-        "position", "gender", "nationality", "residing_country", "same_nationality",
-        "dob", "id_issuing_country",
+        "position", "gender", "nationality", "residing_country", "same_nationality", "dob",
     ):
         assert removed_key not in d1, f"{removed_key} should no longer be extracted"
 
@@ -311,6 +310,155 @@ def test_nnc1_ubo_unknown_total_flags_missing_pct():
     assert len(r["ubos"]) == 1, r["ubos"]
     assert r["ubos"][0]["shareholding_pct"]["status"] == "missing", r["ubos"][0]
     print("test_nnc1_ubo_unknown_total_flags_missing_pct OK", r["ubos"][0])
+
+
+# Best-effort reconstruction of a real "PI-NNC1" director particulars page
+# (首任公司秘書／董事(自然人)- 受保護資料 / First Company Secretary /
+# Director (Individual) - Protected Information), based on the exact field
+# labels/order/example values supplied against a real bug report: the
+# previous extractor was grabbing label text ("Surname", "Building", the
+# page heading, ...) instead of the filled-in values next to them.
+PI_NNC1_CHINA_ID_TEXT = """
+PI-NNC1
+首任公司秘書／董事(自然人)- 受保護資料
+First Company Secretary / Director (Individual) - Protected Information
+
+中文姓名 / Name in Chinese
+邱漢城
+
+英文姓名 / Name in English
+姓氏
+Surname
+
+名字
+Other Names
+
+身分識別 / Identification
+香港身份證號碼
+Hong Kong Identity Card No.
+NIL
+
+護照
+Passport
+完整號碼
+Full Number
+440304199501252615
+簽發國家/地區
+Issuing Country
+China
+
+董事的通常住址 / Usual Residential Address of Director
+室/樓/座
+Flat/Floor/Block
+D2205
+大廈
+Building
+TIANRENJU DISTRICT 1
+街道
+Street
+NO. 1 JINGTIAN NORTH STREET
+地區/市/省
+District/City/Province
+FUTIAN DISTRICT, SHENZHEN CITY, GUANGDONG PROVINCE
+國家
+Country
+China
+"""
+
+
+def test_pi_nnc1_no_label_text_leaks_into_values():
+    """Core bug: none of the extracted field values should ever equal a
+    field label (中文姓名/Surname/Other Names/身分識別/PI-NNC1/etc)."""
+    r = nnc1_rules.extract_nnc1(PI_NNC1_CHINA_ID_TEXT, source="NNC1")
+    assert len(r["directors"]) == 1, r["directors"]
+    d = r["directors"][0]
+
+    label_like = {
+        "surname", "other names", "othernames", "identification", "身分識別",
+        "hong kong identity card no.", "pi-nnc1", "building", "street", "country",
+        "flat/floor/block", "usual residential address of director",
+    }
+    for key, f in d.items():
+        assert f["value"].strip().lower() not in label_like, (key, f)
+
+    print("test_pi_nnc1_no_label_text_leaks_into_values OK", d)
+
+
+def test_pi_nnc1_exact_field_values():
+    """Exact expected values from the real-world bug report example."""
+    r = nnc1_rules.extract_nnc1(PI_NNC1_CHINA_ID_TEXT, source="NNC1")
+    d = r["directors"][0]
+
+    assert d["surname_cn"]["value"] == "邱", d["surname_cn"]
+    assert d["given_cn"]["value"] == "漢城", d["given_cn"]
+    assert d["id_info"]["value"] == "440304199501252615", d["id_info"]
+    assert d["id_issuing_country"]["value"] == "China", d["id_issuing_country"]
+    assert d["residential_address"]["value"] == (
+        "D2205, TIANRENJU DISTRICT 1, NO. 1 JINGTIAN NORTH STREET, "
+        "FUTIAN DISTRICT, SHENZHEN CITY, GUANGDONG PROVINCE, China"
+    ), d["residential_address"]
+    print("test_pi_nnc1_exact_field_values OK", d)
+
+
+def test_pi_nnc1_mandarin_pinyin_fallback_when_english_name_blank():
+    """China ID on file + blank English name -> Mandarin Hanyu Pinyin,
+    marked 'inferred' (a deterministic, standardised transliteration)."""
+    r = nnc1_rules.extract_nnc1(PI_NNC1_CHINA_ID_TEXT, source="NNC1")
+    d = r["directors"][0]
+    assert d["surname_en"]["value"] == "Qiu", d["surname_en"]
+    assert d["surname_en"]["status"] == "inferred", d["surname_en"]
+    assert d["given_en"]["value"] == "Hancheng", d["given_en"]
+    assert d["given_en"]["status"] == "inferred", d["given_en"]
+    print("test_pi_nnc1_mandarin_pinyin_fallback_when_english_name_blank OK", d["surname_en"], d["given_en"])
+
+
+def test_pi_nnc1_cantonese_suggestion_when_hkid_and_english_name_blank():
+    """HKID on file (not NIL) + blank English name -> a Cantonese/HK-ID-
+    style romanization *suggestion*, marked 'suggested' (never 'inferred')
+    since there's no reliable standard scheme to compute it from."""
+    text = PI_NNC1_CHINA_ID_TEXT.replace(
+        "香港身份證號碼\nHong Kong Identity Card No.\nNIL",
+        "香港身份證號碼\nHong Kong Identity Card No.\nA1234567",
+    ).replace(
+        "完整號碼\nFull Number\n440304199501252615\n簽發國家/地區\nIssuing Country\nChina",
+        "完整號碼\nFull Number\n\n簽發國家/地區\nIssuing Country\n",
+    )
+    r = nnc1_rules.extract_nnc1(text, source="NNC1")
+    d = r["directors"][0]
+    assert d["id_info"]["value"] == "A1234567", d["id_info"]
+    assert d["id_issuing_country"]["value"] == "Hong Kong", d["id_issuing_country"]
+    assert d["surname_en"]["value"] == "Yau", d["surname_en"]
+    assert d["surname_en"]["status"] == "suggested", d["surname_en"]
+    assert d["given_en"]["value"] == "Hon Shing", d["given_en"]
+    assert d["given_en"]["status"] == "suggested", d["given_en"]
+    print("test_pi_nnc1_cantonese_suggestion_when_hkid_and_english_name_blank OK", d["surname_en"], d["given_en"])
+
+
+def test_pi_nnc1_filled_english_name_is_used_as_is_no_romanization():
+    text = PI_NNC1_CHINA_ID_TEXT.replace(
+        "姓氏\nSurname\n\n名字\nOther Names",
+        "姓氏\nSurname\nCHOW\n\n名字\nOther Names\nHON SHING",
+    )
+    r = nnc1_rules.extract_nnc1(text, source="NNC1")
+    d = r["directors"][0]
+    assert d["surname_en"]["value"] == "CHOW", d["surname_en"]
+    assert d["surname_en"]["status"] == "extracted", d["surname_en"]
+    assert d["given_en"]["value"] == "HON SHING", d["given_en"]
+    assert d["given_en"]["status"] == "extracted", d["given_en"]
+    print("test_pi_nnc1_filled_english_name_is_used_as_is_no_romanization OK", d["surname_en"], d["given_en"])
+
+
+def test_pi_nnc1_does_not_regress_simple_single_line_address_format():
+    """Guard against the regression this rewrite introduced and fixed:
+    the PI-NNC1 component-address grab must not fire on a plain single-
+    line "Residential Address: value" block just because the value text
+    happens to contain a word like "Street"."""
+    d = nnc1_rules.extract_nnc1(NNC1_TEXT, source="NNC1")["directors"][1]
+    assert d["surname_en"]["value"] == "WONG", d["surname_en"]
+    assert d["residential_address"]["value"] == "20 BAKER STREET, LONDON, UNITED KINGDOM", (
+        d["residential_address"]
+    )
+    print("test_pi_nnc1_does_not_regress_simple_single_line_address_format OK", d["residential_address"])
 
 
 def test_normalize_date_variants():
@@ -444,6 +592,12 @@ if __name__ == "__main__":
     test_nnc1()
     test_nnc1_corporate_ubo()
     test_nnc1_ubo_unknown_total_flags_missing_pct()
+    test_pi_nnc1_no_label_text_leaks_into_values()
+    test_pi_nnc1_exact_field_values()
+    test_pi_nnc1_mandarin_pinyin_fallback_when_english_name_blank()
+    test_pi_nnc1_cantonese_suggestion_when_hkid_and_english_name_blank()
+    test_pi_nnc1_filled_english_name_is_used_as_is_no_romanization()
+    test_pi_nnc1_does_not_regress_simple_single_line_address_format()
     test_normalize_date_variants()
     test_merge()
     test_merge_ubo_dedup_across_nnc1_and_nar1()
