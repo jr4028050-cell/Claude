@@ -15,48 +15,81 @@ _BR_NUMBER_RE = re.compile(
     r"([0-9\-]{8,20})",
     re.IGNORECASE,
 )
-_ADDRESS_LABEL_STRONG = (
-    r"(?:Business Address|經營地址|Registered Address|"
-    # official Form 2 layout: 地址 / Address stacked on two lines (either order)
-    r"地\s*址\s*/?\s*\n?\s*Address|Address\s*/?\s*\n?\s*地\s*址|"
-    r"business address of the person\(s\)[^\n]*)"
-)
-_ADDRESS_STOP = (
+# Field labels that mark the end of the address block.
+_ADDRESS_STOP_RE = re.compile(
     r"(?:Nature of Business|Date of|New Registration|Certificate|Status|"
     r"業務性質|法律地位|發證日期|生效日期|屆滿日期|登記證號碼|"
-    r"Address|地址|Effective Date|Particulars)"
-)
-_ADDRESS_STRONG_RE = re.compile(
-    _ADDRESS_LABEL_STRONG + r"\s*[:.]?\s*\n?"
-    r"([^\n]+(?:\n(?!\s*" + _ADDRESS_STOP + r")[^\n]+){0,5})",
+    r"Effective Date|Particulars)",
     re.IGNORECASE,
 )
-# Some real Form 2 extractions only surface the English half ("Address") as
-# its own line, with the Chinese "地址" caption lost in text-layer/OCR
-# extraction. Match it only when it is the *entire* line (nothing else on
-# it) so running text that happens to contain the word "address" (e.g.
-# footer notices about notifying the Registrar of an address change) is
-# not mistaken for the field label.
-_ADDRESS_BARE_LABEL_RE = re.compile(
-    r"^[ \t]*(?:Address|地\s*址)[ \t]*:?[ \t]*$",
+# Boilerplate/ordinance text that sometimes sits between the document
+# header and the actual address field — never part of the address itself.
+_ADDRESS_NOISE_RE = re.compile(
+    r"ORDINANCE|REGULATION|FORM\s*2|CARE\s*OF|NOT\s*ACCEPTABLE|"
+    r"POST\s*OFFICE\s*BOX|ORIGINAL|DUPLICATE|商業登記條例|商業登記規例",
+    re.IGNORECASE,
+)
+# The address field's label line: "Business Address" / "經營地址" /
+# "Registered Address" (compound forms), or a bare "地址" / "Address" —
+# each optionally followed inline by the first fragment of the value, e.g.
+# the official Form 2 layout "地 址 RM 509, 5/F THE CLOUD 111". Anchored
+# at the start of a line so it can never match "business address" appearing
+# mid-sentence in disclaimer/instructions text.
+_ADDRESS_LABEL_LINE_RE = re.compile(
+    r"^[ \t]*(?:Business\s*Address|經營地址|Registered\s*Address|"
+    # combined bilingual label on one line, e.g. "Address / 地址"
+    r"地\s*址\s*/\s*Address|Address\s*/\s*地\s*址|"
+    r"地\s*址|Address)"
+    r"[ \t]*[:：]?[ \t]*(.*)$",
     re.IGNORECASE | re.MULTILINE,
-)
-_ADDRESS_BARE_VALUE_RE = re.compile(
-    r"\s*\n?([^\n]+(?:\n(?!\s*" + _ADDRESS_STOP + r")[^\n]+){0,5})",
-    re.IGNORECASE,
 )
 
 
 def _extract_address(text: str) -> str:
-    m = _ADDRESS_STRONG_RE.search(text)
-    if m:
-        return collapse_line(m.group(1))
+    lines = (text or "").split("\n")
+    fragments: list[str] = []
+    label_seen = False
 
-    label_m = _ADDRESS_BARE_LABEL_RE.search(text)
-    if not label_m:
+    i = 0
+    while i < len(lines):
+        m = _ADDRESS_LABEL_LINE_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+
+        # Found the field label. The official Form 2 layout repeats the
+        # label on two consecutive lines (Chinese then English), each
+        # carrying one fragment of the value on the same line — consume
+        # both before moving on to pure continuation lines.
+        label_seen = True
+        frag = m.group(1).strip()
+        if frag and not _ADDRESS_NOISE_RE.search(frag):
+            fragments.append(frag)
+        i += 1
+
+        m2 = _ADDRESS_LABEL_LINE_RE.match(lines[i]) if i < len(lines) else None
+        if m2:
+            frag2 = m2.group(1).strip()
+            if frag2 and not _ADDRESS_NOISE_RE.search(frag2):
+                fragments.append(frag2)
+            i += 1
+
+        while i < len(lines):
+            nxt = lines[i]
+            if not nxt.strip():
+                break
+            if _ADDRESS_STOP_RE.search(nxt) or _ADDRESS_LABEL_LINE_RE.match(nxt):
+                break
+            if not _ADDRESS_NOISE_RE.search(nxt):
+                fragments.append(nxt.strip())
+            i += 1
+        break
+
+    if not label_seen:
         return ""
-    value_m = _ADDRESS_BARE_VALUE_RE.match(text, label_m.end())
-    return collapse_line(value_m.group(1)) if value_m else ""
+    return collapse_line(" ".join(fragments))
+
+
 _NATURE_RE = re.compile(
     r"(?:Nature of Business|業務性質)\s*[:.]?\s*\n?\s*([^\n]+)",
     re.IGNORECASE,

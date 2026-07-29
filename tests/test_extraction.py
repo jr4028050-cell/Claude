@@ -150,6 +150,43 @@ def test_br_official_form2_stacked_address_label():
     print("test_br_official_form2_stacked_address_label OK", r["business_address"])
 
 
+# Verbatim pdfplumber.extract_text() output from a real HK Form 2 (BR
+# certificate) sample. Note the label line carries the first fragment of
+# the value inline ("地 址 RM 509, 5/F THE CLOUD 111"), the English label
+# repeats on the next line with the second fragment ("Address TUNG CHAU ST
+# TAI KOK TSUI"), and the header above is full of "ORDINANCE"/"FORM 2"/
+# "REGULATION" boilerplate that a naive first-match-of-"address" regex
+# will latch onto instead of the real field.
+REAL_FORM2_TEXT = (
+    "請沿虛線剪下並將有效的商業/分行登記證展示在營業地點。\n"
+    "Please cut along the dotted line and display the valid business/branch "
+    "registration certificate at business address.\n"
+    "以\n正 本 表格 2 FORM 2 [第5條]\n"
+    "ORIGINAL 《商業登記條例》（第310章） [regulation 5 ]\n"
+    "BUSINESS REGISTRATION ORDINANCE (Chapter 310)\n"
+    "《商業登記規例》\n複 本 BUSINESS REGISTRATION REGULATIONS\nDUPLICATE\n"
+    "商業 / 分行登記證 Business / Branch Registration Certificate\n"
+    "業務 / 法團所用名稱 NOVAUNB LIMITED\nName of Business/\nCorporation\n"
+    "業務 / 分行名稱 " + "* " * 24 + "\nBusiness/\nBranch Name\n" + "* " * 24 + "\n"
+    "地 址 RM 509, 5/F THE CLOUD 111\n"
+    "Address TUNG CHAU ST TAI KOK TSUI\n"
+    "HONG KONG\n"
+    "業務性質 CORP\nNature of Business\n"
+    "法律地位\nBODY CORPORATE\nStatus\n"
+)
+
+
+def test_br_real_form2_address_ignores_header_boilerplate():
+    r = br_rules.extract_br(REAL_FORM2_TEXT)
+    assert r["business_address"]["value"] == (
+        "RM 509, 5/F THE CLOUD 111 TUNG CHAU ST TAI KOK TSUI HONG KONG"
+    ), r["business_address"]
+    assert r["business_address"]["status"] == "extracted"
+    for noise in ("ORDINANCE", "FORM 2", "regulation", "ORIGINAL", "DUPLICATE"):
+        assert noise.upper() not in r["business_address"]["value"].upper(), r["business_address"]
+    print("test_br_real_form2_address_ignores_header_boilerplate OK", r["business_address"])
+
+
 def test_br_address_fills_both_reg_and_op_address():
     """When no NNC1/NAR1 is uploaded, the BR address should populate both
     enterprise.reg_address and enterprise.op_address, both as 'extracted'."""
@@ -164,6 +201,8 @@ def test_br_address_fills_both_reg_and_op_address():
     assert ent["reg_address"]["status"] == "extracted", ent["reg_address"]
     assert ent["op_address"]["value"] == expected, ent["op_address"]
     assert ent["op_address"]["status"] == "extracted", ent["op_address"]
+    assert ent["reg_country"]["value"] == "Hong Kong / 中国香港", ent["reg_country"]
+    assert ent["op_country"]["value"] == "Hong Kong / 中国香港", ent["op_country"]
     print("test_br_address_fills_both_reg_and_op_address OK", ent["reg_address"], ent["op_address"])
 
 
@@ -269,6 +308,7 @@ if __name__ == "__main__":
     test_br()
     test_br_bilingual_multiline_address()
     test_br_official_form2_stacked_address_label()
+    test_br_real_form2_address_ignores_header_boilerplate()
     test_br_address_fills_both_reg_and_op_address()
     test_nnc1()
     test_normalize_date_variants()

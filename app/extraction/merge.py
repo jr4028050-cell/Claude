@@ -159,11 +159,12 @@ def merge(
 
     # --- operating country / address: BR, else default / inferred from reg_address ---
     if business_address["value"]:
-        op_country_value = guess_country_from_address(business_address["value"]) or "Hong Kong"
+        guessed_country = guess_country_from_address(business_address["value"])
+        op_country_value = "Hong Kong / 中国香港" if guessed_country == "Hong Kong" else (guessed_country or "Hong Kong / 中国香港")
         op_country = schema.extracted(op_country_value, "BR")
         op_address = business_address
     else:
-        op_country = schema.default("Hong Kong")
+        op_country = schema.default("Hong Kong / 中国香港")
         if reg_address["value"]:
             op_address = schema.inferred(reg_address["value"], "reg_address")
         else:
