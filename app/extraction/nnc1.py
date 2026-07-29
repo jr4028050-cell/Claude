@@ -49,6 +49,17 @@ _CHINESE_NAME_LABEL_RE = re.compile(
     r"中文姓名(?:\s*/\s*Name\s*in\s*Chinese)?|Name\s*in\s*Chinese",
     re.IGNORECASE,
 )
+# The PI-NNC1 attachment's page heading — one such page is one person's
+# full particulars. When present, this is the block boundary: it is far
+# more specific than scanning for a bare "Surname"/"姓氏" occurrence, which
+# can also appear in unrelated sections (e.g. a proposed-company-name
+# field asking for an "English or Chinese" name) and would otherwise be
+# mistaken for a second director.
+_PI_NNC1_PAGE_RE = re.compile(
+    r"首任公司秘書／?董事\s*\(自然人\)|"
+    r"First\s*Company\s*Secretary\s*/\s*Director\s*\(Individual\)",
+    re.IGNORECASE,
+)
 
 _STOP_SECTION_RE = re.compile(
     r"\n\s*(?:Particulars of Shares|Shareholder|股東|Statement|聲明|Signature|簽署)",
@@ -120,8 +131,12 @@ _ISSUING_COUNTRY_LABELS = (r"簽發國家(?:\s*/\s*地區)?", r"Issuing\s*Countr
 _LABEL_FRAGMENTS = [
     r"Surname(?:\s*or\s*Company\s*Name)?", r"姓氏",
     r"Other\s*Names?", r"Forename\(?s?\)?", r"Given\s*Name\(?s?\)?", r"名字",
+    r"前用姓名", r"曾用姓名", r"Former\s*Name\(?s?\)?",
     r"中文姓名", r"Name\s*in\s*Chinese", r"Chinese\s*Name",
     r"英文姓名", r"Name\s*in\s*English",
+    r"建議採用的公司英文或中文名稱", r"建议采用的公司英文或中文名称",
+    r"Proposed\s*Company\s*(?:English\s*or\s*Chinese|Chinese\s*or\s*English)\s*Name",
+    r"或\s*OR", r"in\s*Hong\s*Kong", r"elsewhere",
     r"身分識別", r"身份識別", r"Identification",
     r"香港身份證(?:號碼)?", r"Hong\s*Kong\s*Identity\s*Card(?:\s*No\.?)?", r"HKID",
     r"護照", r"Passport",
@@ -145,10 +160,19 @@ _LABEL_NOISE_RE = re.compile(
     r"^\s*" + _LABEL_FRAGMENT_ALT + r"(?:\s*[/／,，]\s*" + _LABEL_FRAGMENT_ALT + r")*\s*$",
     re.IGNORECASE,
 )
+# Parenthetical instructional asides ("(Please state the full address in
+# Hong Kong or elsewhere)") sit right next to several PI-NNC1 fields and
+# must never be captured as if they were the filled-in value.
+_INSTRUCTION_NOISE_RE = re.compile(
+    r"^\s*\(.*\)\s*$|Please\s*state|not\s*acceptable|Post\s*Office\s*Box",
+    re.IGNORECASE,
+)
 
 
 def _is_label_noise(value: str) -> bool:
-    return bool(_LABEL_NOISE_RE.match(value or ""))
+    if not value:
+        return False
+    return bool(_LABEL_NOISE_RE.match(value) or _INSTRUCTION_NOISE_RE.search(value))
 
 
 def _grab_line(block: str, *label_patterns: str) -> str:
@@ -206,12 +230,35 @@ def _dedupe_close_starts(positions: list[int], min_gap: int = 30) -> list[int]:
     return deduped
 
 
+def _split_by_positions(text: str, starts: list[int], end_limit: int) -> list[str]:
+    blocks = []
+    for i, s_start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else end_limit
+        if end <= s_start:
+            continue
+        blocks.append(text[s_start:end])
+    return blocks
+
+
 def _split_director_blocks(text: str) -> list[str]:
+    stop_m = _STOP_SECTION_RE.search(text)
+    end_limit = stop_m.start() if stop_m else len(text)
+
+    # Primary: one PI-NNC1 attachment page = one director. Scoping to the
+    # page heading means field lookups below never wander into an
+    # unrelated section (a proposed-company-name field, a different
+    # director's page, ...) and mistake its label text for this person's
+    # data — the exact failure mode this design fixes.
+    page_starts = [m.start() for m in _PI_NNC1_PAGE_RE.finditer(text)]
+    if page_starts:
+        return _split_by_positions(text, page_starts, end_limit)
+
+    # Fallback: no PI-NNC1 attachment page found — the older, simpler
+    # "Surname or Company Name" table-row format (one row per director,
+    # no dedicated per-person page).
     surname_starts = _dedupe_close_starts([m.start() for m in _BLOCK_START_RE.finditer(text)])
     if not surname_starts:
         return []
-    stop_m = _STOP_SECTION_RE.search(text)
-    end_limit = stop_m.start() if stop_m else len(text)
 
     blocks = []
     prev_end = 0
@@ -219,9 +266,9 @@ def _split_director_blocks(text: str) -> list[str]:
         end = surname_starts[i + 1] if i + 1 < len(surname_starts) else end_limit
         if end <= s_start:
             continue
-        # PI-NNC1 pages list 中文姓名 *before* Surname/Other Names; widen
-        # the block backward to include it, without stealing text already
-        # claimed by the previous block.
+        # 中文姓名 is listed *before* Surname/Other Names on some layouts;
+        # widen the block backward to include it, without stealing text
+        # already claimed by the previous block.
         block_start = s_start
         search_from = max(prev_end, s_start - 400)
         last_cn_label = None
@@ -258,7 +305,10 @@ def _grab_pi_nnc1_address(block: str) -> str:
     # those words where they appear *inside* the address value itself
     # (e.g. "...STREET" in "20 BAKER STREET") rather than as a label —
     # leave it for `_grab_generic_address` to handle instead.
-    if not _ADDR_FLAT_LABEL_RE.search(sub_block[:80]):
+    # 200 chars, not 80: some forms insert an instructional note ("Please
+    # state the full address in Hong Kong or elsewhere") between the
+    # heading and the first sub-label.
+    if not _ADDR_FLAT_LABEL_RE.search(sub_block[:200]):
         return ""
     parts = [
         _grab_line(sub_block, *_ADDR_FLAT_LABELS),

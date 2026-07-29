@@ -461,6 +461,95 @@ def test_pi_nnc1_does_not_regress_simple_single_line_address_format():
     print("test_pi_nnc1_does_not_regress_simple_single_line_address_format OK", d["residential_address"])
 
 
+def test_pi_nnc1_ignores_unrelated_sections_and_instructional_notes():
+    """Real bug report: block splitting previously scanned the whole
+    document for bare "Surname"/"姓氏" occurrences, so an unrelated
+    "Proposed Company English or Chinese Name" field (which also contains
+    "或 OR" bilingual text) got mistaken for a second, fake director, and
+    the real director's fields picked up stray label fragments ("前用姓名"
+    Former Name, an "(...)"" instructional note before the address
+    sub-fields). Scoping each director to its own PI-NNC1 page fixes both:
+    exactly one real director, with clean field values."""
+    text = """
+    FORM NNC1
+    INCORPORATION FORM
+
+    1. Company Name
+    建議採用的公司英文或中文名稱
+    Proposed Company English or Chinese Name
+    NOVAUNB LIMITED 或 OR 諾凡股份有限公司
+
+    2. Registered Office
+    FLAT B, 12/F, ABC BUILDING, 88 DES VOEUX ROAD CENTRAL, HONG KONG
+
+    3. Particulars of Person(s) Who Are Founder Member(s)/First Director(s)
+
+    PI-NNC1
+    首任公司秘書／董事(自然人)- 受保護資料
+    First Company Secretary / Director (Individual) - Protected Information
+
+    中文姓名 / Name in Chinese
+    邱漢城
+
+    英文姓名 / Name in English
+    姓氏
+    Surname
+
+    名字
+    Other Names
+
+    前用姓名 / Former Name(s)
+
+
+    身分識別 / Identification
+    香港身份證號碼
+    Hong Kong Identity Card No.
+    NIL
+
+    護照
+    Passport
+    完整號碼
+    Full Number
+    440304199501252615
+    簽發國家/地區
+    Issuing Country
+    China
+
+    董事的通常住址 / Usual Residential Address of Director
+    (Please state the full address in Hong Kong or elsewhere)
+    室/樓/座
+    Flat/Floor/Block
+    D2205
+    大廈
+    Building
+    TIANRENJU DISTRICT 1
+    街道
+    Street
+    NO. 1 JINGTIAN NORTH STREET
+    地區/市/省
+    District/City/Province
+    FUTIAN DISTRICT, SHENZHEN CITY, GUANGDONG PROVINCE
+    國家
+    Country
+    China
+
+    4. Share Capital and Initial Shareholdings
+    Total Number of Shares Proposed to be Issued: 10000
+    """
+    r = nnc1_rules.extract_nnc1(text, source="NNC1")
+    assert len(r["directors"]) == 1, r["directors"]  # not 2 (no fake director from the company-name section)
+    d = r["directors"][0]
+    assert d["surname_cn"]["value"] == "邱", d["surname_cn"]
+    assert d["given_cn"]["value"] == "漢城", d["given_cn"]
+    assert d["id_info"]["value"] == "440304199501252615", d["id_info"]  # not "NIL"
+    assert d["id_issuing_country"]["value"] == "China", d["id_issuing_country"]
+    assert d["residential_address"]["value"] == (
+        "D2205, TIANRENJU DISTRICT 1, NO. 1 JINGTIAN NORTH STREET, "
+        "FUTIAN DISTRICT, SHENZHEN CITY, GUANGDONG PROVINCE, China"
+    ), d["residential_address"]
+    print("test_pi_nnc1_ignores_unrelated_sections_and_instructional_notes OK", d)
+
+
 def test_normalize_date_variants():
     assert normalize_date("15 March 2023")[0] == "2023-03-15"
     assert normalize_date("2023-03-15")[0] == "2023-03-15"
@@ -598,6 +687,7 @@ if __name__ == "__main__":
     test_pi_nnc1_cantonese_suggestion_when_hkid_and_english_name_blank()
     test_pi_nnc1_filled_english_name_is_used_as_is_no_romanization()
     test_pi_nnc1_does_not_regress_simple_single_line_address_format()
+    test_pi_nnc1_ignores_unrelated_sections_and_instructional_notes()
     test_normalize_date_variants()
     test_merge()
     test_merge_ubo_dedup_across_nnc1_and_nar1()
