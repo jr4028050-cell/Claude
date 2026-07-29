@@ -215,11 +215,17 @@ def test_merge():
     assert ent["name_en"]["value"] == "GWEN INTERNATIONAL LIMITED"
     assert ent["crn"]["value"] == "3012345"
     assert ent["reg_country"]["status"] == "default"
-    assert ent["reg_address"]["value"] == nnc1["registered_address"]["value"]
+    # BR's Address field is authoritative for reg_address even when NNC1/NAR1
+    # was also uploaded and disagrees; the disagreement is still logged.
+    assert ent["reg_address"]["value"] == br["business_address"]["value"]
+    assert ent["reg_address"]["source"] == "BR"
+    assert ent["reg_address"]["status"] == "extracted"
     assert ent["op_address"]["value"] == br["business_address"]["value"]
+    assert len(result["conflicts"]) == 1
+    assert result["conflicts"][0]["field"] == "enterprise.reg_address"
     assert len(result["representatives"]) == 2
     assert result["files"] == ["CI.pdf", "BR.pdf", "NNC1.pdf"]
-    print("test_merge OK", ent)
+    print("test_merge OK", ent, result["conflicts"])
 
 
 def test_endpoint_smoke():

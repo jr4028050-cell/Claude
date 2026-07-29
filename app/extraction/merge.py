@@ -31,18 +31,43 @@ def _director_key(director: dict) -> str:
     return _norm_key(director["surname_en"]["value"]) + "|" + _norm_key(director["given_en"]["value"])
 
 
-def _pick_reg_address(nnc1_sources: list[NNC1Source]) -> tuple[dict, list[dict]]:
-    """Registered address: prefer the newest NAR1, else fall back to NNC1."""
-    candidates = [s for s in nnc1_sources if s.data["registered_address"]["value"]]
-    if not candidates:
+def _pick_reg_address(
+    business_address: dict, nnc1_sources: list[NNC1Source]
+) -> tuple[dict, list[dict]]:
+    """Registered address: BR's Address field is authoritative whenever
+    present (business rule: treat it as the single source of truth even
+    when NNC1/NAR1 disagree), falling back to the newest NAR1 > NNC1 only
+    when no BR file was uploaded.
+    """
+    nnc1_candidates = [s for s in nnc1_sources if s.data["registered_address"]["value"]]
+
+    if business_address["value"]:
+        chosen = business_address
+        distinct_values = {_norm_key(business_address["value"])} | {
+            _norm_key(s.data["registered_address"]["value"]) for s in nnc1_candidates
+        }
+        conflicts = []
+        if len(distinct_values) > 1:
+            conflicts.append({
+                "field": "enterprise.reg_address",
+                "chosen": chosen["value"],
+                "chosen_source": "BR",
+                "candidates": [{"value": chosen["value"], "source": "BR"}] + [
+                    {"value": s.data["registered_address"]["value"], "source": s.filename}
+                    for s in nnc1_candidates
+                ],
+            })
+        return chosen, conflicts
+
+    if not nnc1_candidates:
         return schema.missing(), []
 
-    nar1_candidates = [s for s in candidates if s.doc_kind == "NAR1"]
-    pool = nar1_candidates or candidates
+    nar1_candidates = [s for s in nnc1_candidates if s.doc_kind == "NAR1"]
+    pool = nar1_candidates or nnc1_candidates
     chosen_source = sorted(pool, key=lambda s: s.recency_key)[-1]
     chosen = chosen_source.data["registered_address"]
 
-    distinct_values = {_norm_key(s.data["registered_address"]["value"]) for s in candidates}
+    distinct_values = {_norm_key(s.data["registered_address"]["value"]) for s in nnc1_candidates}
     conflicts = []
     if len(distinct_values) > 1:
         conflicts.append({
@@ -51,7 +76,7 @@ def _pick_reg_address(nnc1_sources: list[NNC1Source]) -> tuple[dict, list[dict]]
             "chosen_source": chosen_source.filename,
             "candidates": [
                 {"value": s.data["registered_address"]["value"], "source": s.filename}
-                for s in candidates
+                for s in nnc1_candidates
             ],
         })
     return chosen, conflicts
@@ -121,26 +146,18 @@ def merge(
     reg_country = schema.default("Hong Kong / 中国香港")
     reg_city = schema.default("Hong Kong")
 
-    # --- reg_address: latest NAR1 > NNC1 > BR ---
-    # BR's Address/地址 field is, in practice, the same address the company
-    # registers with (many HK companies have a single registered/business
-    # address), so when no NNC1/NAR1 is uploaded we use it directly as an
-    # extracted value rather than a merely "inferred" one.
-    reg_address, addr_conflicts = _pick_reg_address(nnc1_sources)
-    conflicts.extend(addr_conflicts)
-    if not reg_address["value"]:
-        for _, br in br_files:
-            if br["business_address"]["value"]:
-                reg_address = schema.extracted(br["business_address"]["value"], "BR")
-                break
-
-    # --- operating country / address: BR, else default / inferred from reg_address ---
+    # --- operating address: BR's Address/地址 field ---
     business_address = schema.missing()
     for _, br in br_files:
         if br["business_address"]["value"]:
             business_address = br["business_address"]
             break
 
+    # --- reg_address: BR (authoritative) > latest NAR1 > NNC1 ---
+    reg_address, addr_conflicts = _pick_reg_address(business_address, nnc1_sources)
+    conflicts.extend(addr_conflicts)
+
+    # --- operating country / address: BR, else default / inferred from reg_address ---
     if business_address["value"]:
         op_country_value = guess_country_from_address(business_address["value"]) or "Hong Kong"
         op_country = schema.extracted(op_country_value, "BR")
