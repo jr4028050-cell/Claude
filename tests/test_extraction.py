@@ -70,6 +70,21 @@ def test_ci():
     print("test_ci OK", r)
 
 
+def test_ci_issued_on():
+    text = """
+    CERTIFICATE OF INCORPORATION
+    No. 3298765
+    I hereby certify that
+    SAMPLE TRADING LIMITED
+    is incorporated in Hong Kong under the Companies Ordinance.
+    Issued on 16 October 2025
+    """
+    r = ci_rules.extract_ci(text)
+    assert r["incorp_date"]["value"] == "2025-10-16", r["incorp_date"]
+    assert r["incorp_date"]["raw"] == "16 October 2025", r["incorp_date"]
+    print("test_ci_issued_on OK", r["incorp_date"])
+
+
 def test_br():
     r = br_rules.extract_br(BR_TEXT)
     assert r["trading_name"]["value"] == "GWEN INTL", r["trading_name"]
@@ -77,6 +92,29 @@ def test_br():
     assert "QUEEN'S ROAD" in r["business_address"]["value"], r["business_address"]
     assert r["effective_date"]["value"] == "2023-03-15", r["effective_date"]
     print("test_br OK", r)
+
+
+def test_br_bilingual_multiline_address():
+    text = """
+    BUSINESS REGISTRATION CERTIFICATE
+    Business Registration Number: 65432109-000-08-24-6
+    Name of Business: CLOUD NINE TRADING
+
+    Address / 地址
+    RM 509, 5/F
+    THE CLOUD
+    111 TUNG CHAU ST
+    TAI KOK TSUI
+    HONG KONG
+
+    Nature of Business: WHOLESALE
+    Date of Commencement: 01/09/2024
+    """
+    r = br_rules.extract_br(text)
+    assert r["business_address"]["value"] == (
+        "RM 509, 5/F THE CLOUD 111 TUNG CHAU ST TAI KOK TSUI HONG KONG"
+    ), r["business_address"]
+    print("test_br_bilingual_multiline_address OK", r["business_address"])
 
 
 def test_nnc1():
@@ -167,7 +205,9 @@ def test_endpoint_smoke():
 
 if __name__ == "__main__":
     test_ci()
+    test_ci_issued_on()
     test_br()
+    test_br_bilingual_multiline_address()
     test_nnc1()
     test_normalize_date_variants()
     test_merge()

@@ -29,8 +29,8 @@ _NAME_FALLBACK_RE = re.compile(
 )
 
 _DATE_ANCHORED_RE = re.compile(
-    r"(?:Date of Incorporation|day of incorporation|this date of|"
-    r"incorporated[^0-9]{0,80}?on|成立日期|注冊成立日期)\s*[:.]?\s*"
+    r"(?:Issued\s*on|Date of Incorporation|day of incorporation|this date of|"
+    r"incorporated[^0-9]{0,80}?on|成立日期|注冊成立日期|簽發日期|签发日期)\s*[:.]?\s*"
     r"([0-9]{1,2}[/\-. ][A-Za-z0-9]{1,9}[/\-. ][0-9]{4}|"
     r"[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}|"
     r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)",

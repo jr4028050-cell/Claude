@@ -16,9 +16,11 @@ _BR_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 _ADDRESS_RE = re.compile(
-    r"(?:Business Address|經營地址|business address of the person\(s\)[^\n]*)\s*[:.]?\s*\n?"
+    r"(?:Business Address|經營地址|Address\s*/\s*地址|Registered Address|"
+    r"business address of the person\(s\)[^\n]*)\s*[:.]?\s*\n?"
     r"([^\n]+(?:\n(?!\s*(?:Nature of Business|Date of|New Registration|"
-    r"Certificate|業務性質|發證日期))[^\n]+){0,3})",
+    r"Certificate|業務性質|發證日期|Address|地址|Effective Date|Particulars))"
+    r"[^\n]+){0,5})",
     re.IGNORECASE,
 )
 _NATURE_RE = re.compile(
