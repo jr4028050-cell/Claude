@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>香港主体材料信息提取</title>
+<style>
+  :root{
+    --ink:#1a1d21;--ink-2:#4a515b;--ink-3:#8b929c;
+    --line:#e2e5ea;--line-2:#eef0f3;
+    --paper:#ffffff;--bg:#f6f7f9;--panel:#fbfcfd;
+    --accent:#1f5fd6;--accent-soft:#eaf1fd;
+    --ok:#127a4b;--ok-soft:#e6f4ec;
+    --warn:#b25e00;--warn-soft:#fbf0e0;
+    --miss:#c0392b;--miss-soft:#fbeae8;
+    --manual:#6b5bd6;--manual-soft:#efecfc;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace;
+    --sans:"Inter","PingFang HK","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--ink);
+    -webkit-font-smoothing:antialiased;line-height:1.5;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* header */
+  header{border-bottom:1px solid var(--line);background:var(--paper)}
+  .head-in{display:flex;align-items:baseline;gap:14px;padding:20px 0}
+  .logo{font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    color:var(--accent);border:1px solid var(--accent);border-radius:4px;
+    padding:3px 8px;text-transform:uppercase}
+  h1{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .sub{font-size:12.5px;color:var(--ink-3);margin-left:auto}
+
+  main{padding:28px 0 60px}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:22px}
+
+  /* upload zones */
+  .zone{background:var(--paper);border:1px solid var(--line);border-radius:10px;
+    padding:18px;transition:border-color .15s}
+  .zone:hover{border-color:#cdd3db}
+  .zone-h{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+  .tag{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;
+    padding:2px 7px;border-radius:4px;background:var(--accent-soft);color:var(--accent)}
+  .zone-h b{font-size:13.5px;font-weight:600}
+  .zone p{font-size:12px;color:var(--ink-3);margin-bottom:14px;min-height:32px}
+  .drop{border:1.5px dashed var(--line);border-radius:8px;background:var(--panel);
+    padding:22px 14px;text-align:center;cursor:pointer;transition:.15s}
+  .drop:hover,.drop.drag{border-color:var(--accent);background:var(--accent-soft)}
+  .drop .ic{font-size:20px;color:var(--ink-3);margin-bottom:6px}
+  .drop .t{font-size:12.5px;color:var(--ink-2)}
+  .drop .t b{color:var(--accent);font-weight:600}
+  .files{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .files li{display:flex;align-items:center;gap:8px;font-size:12px;
+    background:var(--panel);border:1px solid var(--line-2);border-radius:6px;
+    padding:7px 10px;color:var(--ink-2)}
+  .files li .fi{color:var(--miss);cursor:pointer;margin-left:auto;font-family:var(--mono)}
+  .files .sz{color:var(--ink-3);font-family:var(--mono);font-size:11px}
+
+  /* action bar */
+  .bar{display:flex;align-items:center;gap:14px;padding:16px 20px;
+    background:var(--paper);border:1px solid var(--line);border-radius:10px;margin-bottom:24px}
+  .bar .note{font-size:12.5px;color:var(--ink-3)}
+  .btn{font-family:var(--sans);font-size:13.5px;font-weight:600;border:none;
+    border-radius:7px;padding:10px 20px;cursor:pointer;transition:.12s}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .btn-go{background:var(--accent);color:#fff;margin-left:auto}
+  .btn-go:hover:not(:disabled){background:#1a52ba}
+  .btn-2{background:var(--paper);color:var(--ink-2);border:1px solid var(--line)}
+  .btn-2:hover:not(:disabled){border-color:#cdd3db}
+
+  /* results */
+  .res{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .res-h{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .res-h h2{font-size:14.5px;font-weight:600}
+  .legend{display:flex;gap:14px;margin-left:auto;font-size:11.5px;color:var(--ink-3);flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .dot{width:8px;height:8px;border-radius:2px;display:inline-block}
+  .d-ok{background:var(--ok)}.d-def{background:var(--accent)}
+  .d-warn{background:var(--warn)}.d-miss{background:var(--miss)}.d-man{background:var(--manual)}
+
+  .sect{padding:6px 20px 4px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--ink-3);background:var(--panel);
+    border-bottom:1px solid var(--line-2);padding-top:14px;padding-bottom:9px}
+
+  .warnbox{margin:14px 20px 0;padding:10px 14px;background:var(--warn-soft);color:var(--warn);
+    border-radius:8px;font-size:12px;line-height:1.6}
+  .conflictbox{margin:14px 20px 0;padding:10px 14px;background:var(--miss-soft);color:var(--miss);
+    border-radius:8px;font-size:12px;line-height:1.6}
+
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;font-weight:600;letter-spacing:.04em;
+    color:var(--ink-3);text-transform:uppercase;padding:9px 20px;border-bottom:1px solid var(--line-2)}
+  td{padding:11px 20px;border-bottom:1px solid var(--line-2);font-size:13px;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .fld{color:var(--ink-2);width:190px}
+  .fld .req{color:var(--miss);margin-left:3px}
+  .val{font-weight:500}
+  .val input{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink);
+    border:1px solid transparent;background:transparent;border-radius:5px;
+    padding:5px 8px;width:100%;max-width:360px;transition:.12s}
+  .val input:hover{border-color:var(--line)}
+  .val input:focus{outline:none;border-color:var(--accent);background:var(--accent-soft)}
+  .val input.empty{background:var(--miss-soft)}
+  .src{width:150px}
+  .badge{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:2px 8px;
+    border-radius:20px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .b-ok{background:var(--ok-soft);color:var(--ok)}
+  .b-def{background:var(--accent-soft);color:var(--accent)}
+  .b-warn{background:var(--warn-soft);color:var(--warn)}
+  .b-miss{background:var(--miss-soft);color:var(--miss)}
+  .b-man{background:var(--manual-soft);color:var(--manual)}
+  .from{font-family:var(--mono);font-size:11px;color:var(--ink-3);width:90px}
+
+  .rep-card{border:1px solid var(--line);border-radius:8px;margin:14px 20px;overflow:hidden}
+  .rep-top{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line-2)}
+  .rep-top b{font-size:13px}
+  .primary-pick{margin-left:auto;font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+
+  .exports{display:flex;gap:10px;padding:18px 20px;border-top:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+  .exports .btn-2{display:inline-flex;align-items:center;gap:7px}
+  .exports .hint{margin-left:auto;font-size:12px;color:var(--ink-3);align-self:center}
+
+  .empty{text-align:center;padding:70px 20px;color:var(--ink-3)}
+  .empty .ic{font-size:34px;margin-bottom:10px;opacity:.5}
+  .empty p{font-size:13px}
+  .hidden{display:none}
+
+  .loading{text-align:center;padding:70px 20px;color:var(--ink-2)}
+  .spinner{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);
+    border-top-color:var(--accent);margin:0 auto 14px;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  @media(max-width:860px){.grid{grid-template-columns:1fr}.fld{width:auto}.src,.from{display:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap head-in">
+    <span class="logo">HK · KYC</span>
+    <h1>香港主体材料信息提取</h1>
+    <span class="sub">上传 CI / BR / NNC1·NAR1 · 自动提取字段 · 逐项复核</span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- upload zones -->
+  <div class="grid">
+    <div class="zone">
+      <div class="zone-h"><span class="tag">CI</span><b>公司注册证书</b></div>
+      <p>Certificate of Incorporation。提供企业英文名称、注册号码、成立日期。</p>
+      <div class="drop" id="drop-ci">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <input type="file" id="input-ci" accept="application/pdf" multiple class="hidden">
+      <ul class="files" id="f-ci"></ul>
+    </div>
+
+    <div class="zone">
+      <div class="zone-h"><span class="tag">BR</span><b>商业登记证</b></div>
+      <p>Business Registration。提供对外名称、经营地址、生效日期。</p>
+      <div class="drop" id="drop-br">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <input type="file" id="input-br" accept="application/pdf" multiple class="hidden">
+      <ul class="files" id="f-br"></ul>
+    </div>
+
+    <div class="zone">
+      <div class="zone-h"><span class="tag">NNC1 / NAR1</span><b>成立表格 / 周年申报</b></div>
+      <p>提供注册地址与董事/代表个人信息。可多份，取最新。</p>
+      <div class="drop" id="drop-nnc1">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <input type="file" id="input-nnc1" accept="application/pdf" multiple class="hidden">
+      <ul class="files" id="f-nnc1"></ul>
+    </div>
+  </div>
+
+  <div class="bar">
+    <span class="note">已上传后点击开始提取。扫描件将自动转 OCR（繁体＋英文），耗时略长。</span>
+    <button class="btn btn-2" id="btn-reset" onclick="resetAll()">清空</button>
+    <button class="btn btn-go" id="btn-run" onclick="runExtract()">开始提取</button>
+  </div>
+
+  <!-- empty state -->
+  <div class="res" id="empty">
+    <div class="empty">
+      <div class="ic">⌗</div>
+      <p>上传材料并点击「开始提取」，结果将在此处逐字段列出，可直接编辑复核。</p>
+    </div>
+  </div>
+
+  <!-- loading state -->
+  <div class="res hidden" id="loading">
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>正在解析文件，扫描件走 OCR 会较慢，请稍候…</p>
+    </div>
+  </div>
+
+  <!-- results -->
+  <div class="res hidden" id="result">
+    <div class="res-h">
+      <h2>提取结果</h2>
+      <div class="legend">
+        <span><i class="dot d-ok"></i>已提取</span>
+        <span><i class="dot d-def"></i>默认值 / 推断值</span>
+        <span><i class="dot d-warn"></i>遮蔽</span>
+        <span><i class="dot d-miss"></i>缺失待补</span>
+        <span><i class="dot d-man"></i>人工填写</span>
+      </div>
+    </div>
+
+    <div id="warnings"></div>
+    <div id="conflicts"></div>
+
+    <div class="sect">企业信息</div>
+    <table><tbody id="ent"></tbody></table>
+
+    <div class="sect">企业代表</div>
+    <div id="reps"></div>
+
+    <div class="exports">
+      <button class="btn-2" onclick="exportJSON()">⤓ 导出 JSON</button>
+      <button class="btn-2" onclick="exportCSV()">⤓ 导出 CSV</button>
+      <span class="hint">必填字段缺失或遮蔽时已高亮，请人工补录后再导出。</span>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // ---------- upload state ----------
+  const store = { ci: [], br: [], nnc1: [] };
+  const ZONES = ['ci', 'br', 'nnc1'];
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function renderFiles(k) {
+    const ul = document.getElementById('f-' + k);
+    ul.innerHTML = store[k].map((f, i) =>
+      `<li>▤ ${escapeHtml(f.name)}<span class="sz">${fmtSize(f.size)}</span>
+       <span class="fi" data-k="${k}" data-i="${i}">✕</span></li>`).join('');
+    ul.querySelectorAll('.fi').forEach(el => {
+      el.addEventListener('click', () => {
+        store[el.dataset.k].splice(Number(el.dataset.i), 1);
+        renderFiles(el.dataset.k);
+      });
+    });
+  }
+
+  function addFiles(k, fileList) {
+    for (const f of fileList) {
+      if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+        store[k].push(f);
+      }
+    }
+    renderFiles(k);
+  }
+
+  ZONES.forEach(k => {
+    const drop = document.getElementById('drop-' + k);
+    const input = document.getElementById('input-' + k);
+    drop.addEventListener('click', () => input.click());
+    input.addEventListener('change', (e) => { addFiles(k, e.target.files); input.value = ''; });
+    ['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, (e) => {
+      e.preventDefault(); drop.classList.add('drag');
+    }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => {
+      e.preventDefault(); drop.classList.remove('drag');
+    }));
+    drop.addEventListener('drop', (e) => {
+      if (e.dataTransfer && e.dataTransfer.files) addFiles(k, e.dataTransfer.files);
+    });
+  });
+
+  function resetAll() {
+    ZONES.forEach(k => { store[k] = []; renderFiles(k); });
+    show('empty');
+  }
+
+  function show(which) {
+    ['empty', 'loading', 'result'].forEach(id =>
+      document.getElementById(id).classList.toggle('hidden', id !== which));
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  // ---------- extraction ----------
+  let lastResult = null; // raw backend payload, mutated in place as user edits
+
+  async function runExtract() {
+    if (!store.ci.length && !store.br.length && !store.nnc1.length) {
+      alert('请先上传至少一个文件');
+      return;
+    }
+    const fd = new FormData();
+    store.ci.forEach(f => fd.append('ci_files', f));
+    store.br.forEach(f => fd.append('br_files', f));
+    store.nnc1.forEach(f => fd.append('nnc1_files', f));
+
+    document.getElementById('btn-run').disabled = true;
+    document.getElementById('btn-reset').disabled = true;
+    show('loading');
+
+    try {
+      const res = await fetch('/api/extract', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`服务端返回 ${res.status}：${text}`);
+      }
+      const data = await res.json();
+      lastResult = data;
+      renderResult(data);
+      show('result');
+      document.getElementById('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      show('empty');
+      alert('提取失败：' + err.message + '\n\n请确认本地后端服务已启动（uvicorn app.main:app）。');
+    } finally {
+      document.getElementById('btn-run').disabled = false;
+      document.getElementById('btn-reset').disabled = false;
+    }
+  }
+
+  // field metadata: [key, 中文名, required]
+  const ENT_FIELDS = [
+    ['name_en', '企业英文名称', true],
+    ['trading_name', '企业对外名称', false],
+    ['crn', '公司注册号码 (CRN)', true],
+    ['incorp_date', '成立日期', true],
+    ['reg_country', '注册国家', false],
+    ['reg_city', '注册城市', true],
+    ['reg_address', '注册详细地址', true],
+    ['op_country', '经营国家', true],
+    ['op_address', '经营详细地址', true],
+  ];
+  const REP_FIELDS = [
+    ['surname_cn', '代表姓氏（中文）', true],
+    ['given_cn', '名字（中文）', true],
+    ['surname_en', '英文姓氏', true],
+    ['given_en', '英文名字', true],
+    ['position', '职位', true],
+    ['gender', '性别', true],
+    ['nationality', '国籍', true],
+    ['residing_country', '居住国家', true],
+    ['same_nationality', '同国籍', false],
+    ['residential_address', '居住地址', true],
+    ['id_issuing_country', '证件签发国家', true],
+    ['dob', '出生日期', true],
+    ['id_info', '证件信息', true],
+  ];
+  const BADGE = {
+    extracted: ['b-ok', '已提取'],
+    default: ['b-def', '默认值'],
+    inferred: ['b-def', '推断值'],
+    masked: ['b-warn', '遮蔽'],
+    missing: ['b-miss', '缺失'],
+    manual: ['b-man', '人工填写'],
+  };
+
+  function fieldRow(scope, idx, key, label, required, f) {
+    f = f || { value: '', source: '', status: 'missing' };
+    const empty = (!f.value) ? 'empty' : '';
+    const b = BADGE[f.status] || BADGE.missing;
+    return `<tr>
+      <td class="fld">${escapeHtml(label)}${required ? '<span class="req">*</span>' : ''}</td>
+      <td class="val"><input class="${empty}" data-scope="${scope}" data-idx="${idx}" data-key="${key}"
+        value="${escapeHtml(f.value)}"
+        placeholder="${f.status === 'missing' ? '待人工补录' : ''}"></td>
+      <td class="src"><span class="badge ${b[0]}" data-badge-for="${scope}-${idx}-${key}">${b[1]}</span></td>
+      <td class="from">${escapeHtml(f.source) || '—'}</td></tr>`;
+  }
+
+  function renderResult(data) {
+    const warnBox = document.getElementById('warnings');
+    warnBox.innerHTML = (data.warnings && data.warnings.length)
+      ? `<div class="warnbox">⚠ ${data.warnings.map(escapeHtml).join('<br>')}</div>` : '';
+
+    const conflictBox = document.getElementById('conflicts');
+    conflictBox.innerHTML = (data.conflicts && data.conflicts.length)
+      ? `<div class="conflictbox">⚠ 检测到字段冲突（已按来源优先级取值，请复核）：<br>` +
+        data.conflicts.map(c =>
+          `${escapeHtml(c.field)}：采用「${escapeHtml(c.chosen)}」(${escapeHtml(c.chosen_source)})，` +
+          `其他候选：${c.candidates.map(x => `「${escapeHtml(x.value)}」(${escapeHtml(x.source)})`).join('、')}`
+        ).join('<br>') + `</div>`
+      : '';
+
+    const ent = data.enterprise || {};
+    document.getElementById('ent').innerHTML = ENT_FIELDS
+      .map(([key, label, req]) => fieldRow('ent', 0, key, label, req, ent[key])).join('');
+
+    const reps = data.representatives || [];
+    document.getElementById('reps').innerHTML = reps.map((rep, i) => {
+      const name = [rep.given_en && rep.given_en.value, rep.surname_en && rep.surname_en.value]
+        .filter(Boolean).join(' ') || `代表 ${i + 1}`;
+      const rows = REP_FIELDS.map(([key, label, req]) => fieldRow('rep', i, key, label, req, rep[key])).join('');
+      return `<div class="rep-card">
+        <div class="rep-top"><b>代表 ${i + 1} · ${escapeHtml(name)}</b>
+          <label class="primary-pick"><input type="radio" name="primary-rep" value="${i}" ${i === 0 ? 'checked' : ''}> 设为主代表</label>
+        </div>
+        <table><tbody>${rows}</tbody></table>
+      </div>`;
+    }).join('') || `<div style="padding:20px;color:var(--ink-3);font-size:13px">未从 NNC1/NAR1 中识别到代表信息，请人工补录。</div>`;
+
+    // wire up edit handlers
+    document.querySelectorAll('#ent input, #reps input[data-scope]').forEach(input => {
+      input.addEventListener('input', onFieldEdit);
+    });
+  }
+
+  function onFieldEdit(e) {
+    const { scope, idx, key } = e.target.dataset;
+    const i = Number(idx);
+    const container = scope === 'ent' ? lastResult.enterprise : lastResult.representatives[i];
+    if (!container[key]) container[key] = { value: '', source: '', status: 'missing' };
+    const f = container[key];
+    const newVal = e.target.value;
+    const wasEmpty = !f.value;
+    f.value = newVal;
+    if (newVal && (f.status === 'missing' || f.status === 'masked')) {
+      f.status = 'manual';
+    } else if (!newVal && wasEmpty === false) {
+      f.status = 'missing';
+    }
+    e.target.classList.toggle('empty', !newVal);
+    const badgeEl = document.querySelector(`[data-badge-for="${scope}-${idx}-${key}"]`);
+    if (badgeEl) {
+      const b = BADGE[f.status] || BADGE.missing;
+      badgeEl.className = `badge ${b[0]}`;
+      badgeEl.textContent = b[1];
+    }
+  }
+
+  function primaryRepIndex() {
+    const checked = document.querySelector('input[name="primary-rep"]:checked');
+    return checked ? Number(checked.value) : 0;
+  }
+
+  // ---------- export ----------
+  function downloadBlob(content, filename, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportJSON() {
+    if (!lastResult) { alert('请先完成提取'); return; }
+    const payload = {
+      ...lastResult,
+      representatives: lastResult.representatives.map((r, i) => ({ ...r, is_primary: i === primaryRepIndex() })),
+    };
+    downloadBlob(JSON.stringify(payload, null, 2), 'hk_extract_result.json', 'application/json');
+  }
+
+  function statusNote(fields, labels) {
+    const notes = [];
+    labels.forEach(([key, label]) => {
+      const f = fields[key];
+      if (f && (f.status === 'missing' || f.status === 'masked')) {
+        notes.push(`${label}:${f.status}`);
+      }
+    });
+    return notes.join('; ');
+  }
+
+  function csvEscape(v) {
+    v = String(v ?? '');
+    if (/[",\n]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
+    return v;
+  }
+
+  function exportCSV() {
+    if (!lastResult) { alert('请先完成提取'); return; }
+    const lines = [];
+
+    lines.push('企业信息');
+    lines.push(ENT_FIELDS.map(([, label]) => csvEscape(label)).concat('status备注').join(','));
+    const ent = lastResult.enterprise || {};
+    lines.push(
+      ENT_FIELDS.map(([key]) => csvEscape((ent[key] && ent[key].value) || ''))
+        .concat(csvEscape(statusNote(ent, ENT_FIELDS.map(([k, l]) => [k, l]))))
+        .join(',')
+    );
+    lines.push('');
+
+    lines.push('企业代表');
+    lines.push(['序号', '主代表'].concat(REP_FIELDS.map(([, label]) => label)).concat('status备注')
+      .map(csvEscape).join(','));
+    const primary = primaryRepIndex();
+    (lastResult.representatives || []).forEach((rep, i) => {
+      const row = [i + 1, i === primary ? '是' : '']
+        .concat(REP_FIELDS.map(([key]) => (rep[key] && rep[key].value) || ''))
+        .concat(statusNote(rep, REP_FIELDS.map(([k, l]) => [k, l])));
+      lines.push(row.map(csvEscape).join(','));
+    });
+
+    const csv = '﻿' + lines.join('\r\n');
+    downloadBlob(csv, 'hk_extract_result.csv', 'text/csv;charset=utf-8');
+  }
+</script>
+</body>
+</html>
