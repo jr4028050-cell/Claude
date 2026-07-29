@@ -117,6 +117,56 @@ def test_br_bilingual_multiline_address():
     print("test_br_bilingual_multiline_address OK", r["business_address"])
 
 
+def test_br_official_form2_stacked_address_label():
+    """Real HK Form 2 (BR certificate) layout: 地址/Address stacked on two
+    lines, each on its own row, with no bilingual slash on one line."""
+    text = """
+    表格 2   FORM 2
+    BUSINESS REGISTRATION ORDINANCE (Chapter 310)
+
+    業務 / 法團所用名稱
+    Name of Business/Corporation
+    NOVAUNB LIMITED
+
+    地 址
+    Address
+    RM 509, 5/F THE CLOUD 111
+    TUNG CHAU ST TAI KOK TSUI
+    HONG KONG
+
+    業務性質
+    Nature of Business
+    CORP
+
+    生效日期
+    Date of Commencement
+    16/10/2025
+    """
+    r = br_rules.extract_br(text)
+    assert r["business_address"]["value"] == (
+        "RM 509, 5/F THE CLOUD 111 TUNG CHAU ST TAI KOK TSUI HONG KONG"
+    ), r["business_address"]
+    assert r["business_address"]["status"] == "extracted"
+    print("test_br_official_form2_stacked_address_label OK", r["business_address"])
+
+
+def test_br_address_fills_both_reg_and_op_address():
+    """When no NNC1/NAR1 is uploaded, the BR address should populate both
+    enterprise.reg_address and enterprise.op_address, both as 'extracted'."""
+    br = br_rules.extract_br(
+        "Address / 地址\nRM 509, 5/F THE CLOUD 111\nTUNG CHAU ST TAI KOK TSUI\nHONG KONG\n"
+        "Nature of Business: CORP"
+    )
+    result = merge(ci_files=[], br_files=[("BR.pdf", br)], nnc1_sources=[])
+    ent = result["enterprise"]
+    expected = "RM 509, 5/F THE CLOUD 111 TUNG CHAU ST TAI KOK TSUI HONG KONG"
+    assert ent["reg_address"]["value"] == expected, ent["reg_address"]
+    assert ent["reg_address"]["status"] == "extracted", ent["reg_address"]
+    assert ent["op_address"]["value"] == expected, ent["op_address"]
+    assert ent["op_address"]["status"] == "extracted", ent["op_address"]
+    print("test_br_address_fills_both_reg_and_op_address OK", ent["reg_address"], ent["op_address"])
+
+
 def test_nnc1():
     r = nnc1_rules.extract_nnc1(NNC1_TEXT, source="NNC1")
     assert "DES VOEUX ROAD" in r["registered_address"]["value"], r["registered_address"]
@@ -212,6 +262,8 @@ if __name__ == "__main__":
     test_ci_issued_on()
     test_br()
     test_br_bilingual_multiline_address()
+    test_br_official_form2_stacked_address_label()
+    test_br_address_fills_both_reg_and_op_address()
     test_nnc1()
     test_normalize_date_variants()
     test_merge()

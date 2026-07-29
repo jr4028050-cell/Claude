@@ -121,14 +121,17 @@ def merge(
     reg_country = schema.default("Hong Kong / 中国香港")
     reg_city = schema.default("Hong Kong")
 
-    # --- reg_address: latest NAR1 > NNC1 ---
+    # --- reg_address: latest NAR1 > NNC1 > BR ---
+    # BR's Address/地址 field is, in practice, the same address the company
+    # registers with (many HK companies have a single registered/business
+    # address), so when no NNC1/NAR1 is uploaded we use it directly as an
+    # extracted value rather than a merely "inferred" one.
     reg_address, addr_conflicts = _pick_reg_address(nnc1_sources)
     conflicts.extend(addr_conflicts)
     if not reg_address["value"]:
-        # fall back to BR's address if nothing from NNC1/NAR1
         for _, br in br_files:
             if br["business_address"]["value"]:
-                reg_address = schema.inferred(br["business_address"]["value"], "BR")
+                reg_address = schema.extracted(br["business_address"]["value"], "BR")
                 break
 
     # --- operating country / address: BR, else default / inferred from reg_address ---

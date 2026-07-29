@@ -15,14 +15,48 @@ _BR_NUMBER_RE = re.compile(
     r"([0-9\-]{8,20})",
     re.IGNORECASE,
 )
-_ADDRESS_RE = re.compile(
-    r"(?:Business Address|經營地址|Address\s*/\s*地址|Registered Address|"
-    r"business address of the person\(s\)[^\n]*)\s*[:.]?\s*\n?"
-    r"([^\n]+(?:\n(?!\s*(?:Nature of Business|Date of|New Registration|"
-    r"Certificate|業務性質|發證日期|Address|地址|Effective Date|Particulars))"
-    r"[^\n]+){0,5})",
+_ADDRESS_LABEL_STRONG = (
+    r"(?:Business Address|經營地址|Registered Address|"
+    # official Form 2 layout: 地址 / Address stacked on two lines (either order)
+    r"地\s*址\s*/?\s*\n?\s*Address|Address\s*/?\s*\n?\s*地\s*址|"
+    r"business address of the person\(s\)[^\n]*)"
+)
+_ADDRESS_STOP = (
+    r"(?:Nature of Business|Date of|New Registration|Certificate|Status|"
+    r"業務性質|法律地位|發證日期|生效日期|屆滿日期|登記證號碼|"
+    r"Address|地址|Effective Date|Particulars)"
+)
+_ADDRESS_STRONG_RE = re.compile(
+    _ADDRESS_LABEL_STRONG + r"\s*[:.]?\s*\n?"
+    r"([^\n]+(?:\n(?!\s*" + _ADDRESS_STOP + r")[^\n]+){0,5})",
     re.IGNORECASE,
 )
+# Some real Form 2 extractions only surface the English half ("Address") as
+# its own line, with the Chinese "地址" caption lost in text-layer/OCR
+# extraction. Match it only when it is the *entire* line (nothing else on
+# it) so running text that happens to contain the word "address" (e.g.
+# footer notices about notifying the Registrar of an address change) is
+# not mistaken for the field label.
+_ADDRESS_BARE_LABEL_RE = re.compile(
+    r"^[ \t]*(?:Address|地\s*址)[ \t]*:?[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_ADDRESS_BARE_VALUE_RE = re.compile(
+    r"\s*\n?([^\n]+(?:\n(?!\s*" + _ADDRESS_STOP + r")[^\n]+){0,5})",
+    re.IGNORECASE,
+)
+
+
+def _extract_address(text: str) -> str:
+    m = _ADDRESS_STRONG_RE.search(text)
+    if m:
+        return collapse_line(m.group(1))
+
+    label_m = _ADDRESS_BARE_LABEL_RE.search(text)
+    if not label_m:
+        return ""
+    value_m = _ADDRESS_BARE_VALUE_RE.match(text, label_m.end())
+    return collapse_line(value_m.group(1)) if value_m else ""
 _NATURE_RE = re.compile(
     r"(?:Nature of Business|業務性質)\s*[:.]?\s*\n?\s*([^\n]+)",
     re.IGNORECASE,
@@ -46,8 +80,7 @@ def extract_br(text: str) -> dict:
     number_m = _BR_NUMBER_RE.search(text)
     br_number = number_m.group(1).strip() if number_m else ""
 
-    addr_m = _ADDRESS_RE.search(text)
-    address = collapse_line(addr_m.group(1)) if addr_m else ""
+    address = _extract_address(text)
 
     nature_m = _NATURE_RE.search(text)
     nature = collapse_line(nature_m.group(1)) if nature_m else ""
