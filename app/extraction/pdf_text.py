@@ -93,7 +93,13 @@ def _words_to_layout_text(
 
 
 def _reconstruct_page_text(page) -> str:
-    words = page.extract_words(x_tolerance=2, y_tolerance=3, keep_blank_chars=False)
+    # x_tolerance=3, not the tighter pdfplumber default: CJK glyphs are
+    # often kerned 2-3pt apart even within one word/phrase, so a tolerance
+    # of ~2 or less splits every Chinese phrase into one "word" per
+    # character ("中文姓名" -> "中", "文", "姓", "名"), which then get
+    # rejoined with stray spaces between them and no longer match any of
+    # nnc1.py's literal-phrase label regexes.
+    words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
     boxes = [{"text": w["text"], "x0": w["x0"], "x1": w["x1"], "top": w["top"]} for w in words]
     return _words_to_layout_text(boxes, _ROW_Y_TOLERANCE_PT, _COLUMN_GAP_PT)
 

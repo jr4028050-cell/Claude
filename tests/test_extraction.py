@@ -550,6 +550,82 @@ def test_pi_nnc1_ignores_unrelated_sections_and_instructional_notes():
     print("test_pi_nnc1_ignores_unrelated_sections_and_instructional_notes OK", d)
 
 
+# Verbatim reproduction of app.extraction.pdf_text's row/column-reconstructed
+# text for the PI-NNC1 director page of a real, user-supplied NNC1 filing
+# (director 張溫娜 / ZHANG WENNA). Captures several real-form quirks the
+# earlier synthetic fixtures above didn't: fullwidth "／" separators
+# throughout, "身分" (no 亻 radical, official form spelling) rather than
+# "身份", the Chinese "無" nil-indicator instead of English "NIL", the
+# Flat/Floor/Block and Building fields genuinely left blank on the form,
+# the District/City/Province English label wrapping onto two lines, and
+# bullet-prefixed bilingual instructional notes ahead of the real fields
+# that contain "香港身分證"/"完整號碼"/"通常住址" as substrings.
+PI_NNC1_REAL_FORM_TEXT = """
+First Company Secretary／Director (Natural Person) –
+Protected Information
+公 眾 紀 錄 不 會 顯 示 此 頁
+This page will not be shown on the public record
+- 請於本頁申報首任公司秘書的香港身分證或護照的完整號碼。
+The full number of Hong Kong Identity Card or passport of the first company secretary
+should be reported on this page.
+- 請於本頁申報首任董事的香港身分證或護照的完整號碼及通常住址。
+The full number of Hong Kong Identity Card or passport and usual residential address of
+the first director should be reported on this page.
+請在適用的空格內加上  號 Please tick the relevant box(es)
+身分   公司秘書   4 董事
+Capacity   Company Secretary   Director
+中文姓名   張溫娜
+Name in Chinese
+英文姓名   姓氏   ZHANG
+Name in English   Surname
+名字   WENNA
+Other Names
+身分識別 Identification
+( a) 香港身分證(完整 號碼)
+無   (   )
+Hong Kong Identity Card (Full Number)
+(b) 護照   簽發國家／地區   China
+Passport   Issuing Country／Region
+完整 號碼
+EC4434885
+Full Number
+董事的通常住址 Usual Residential Address of Director
+室／樓／座等
+Flat／Floor／Block etc.
+大廈
+Building
+街道／屋苑／地段／村等   No. 12-1 Fuxing Lane, Xinhu Community,
+Street／Estate／Lot／Village etc.
+區／市／省／州／郵遞區號等 Jiazi Town, Lufeng City, Guangdong Province
+District／City／Province／
+State／Postal Code etc.
+國家／地區   China
+Country／Region
+"""
+
+
+def test_pi_nnc1_real_document_fullwidth_slash_and_blank_flat_building():
+    """Real user-supplied NNC1 PI page (director 張溫娜): fullwidth "／"
+    separators, "無" as the HKID nil-indicator, and two address sub-fields
+    (Flat/Floor/Block, Building) genuinely left blank must all resolve to
+    the exact values confirmed against the original PDF, not to leaked
+    label/instructional-note fragments."""
+    r = nnc1_rules.extract_nnc1(PI_NNC1_REAL_FORM_TEXT, source="NNC1")
+    assert len(r["directors"]) == 1, r["directors"]
+    d = r["directors"][0]
+    assert d["surname_cn"]["value"] == "張", d["surname_cn"]
+    assert d["given_cn"]["value"] == "溫娜", d["given_cn"]
+    assert d["surname_en"]["value"] == "ZHANG", d["surname_en"]
+    assert d["given_en"]["value"] == "WENNA", d["given_en"]
+    assert d["id_info"]["value"] == "EC4434885", d["id_info"]  # not "無" or an instructional-note fragment
+    assert d["id_issuing_country"]["value"] == "China", d["id_issuing_country"]  # not "Hong Kong"
+    assert d["residential_address"]["value"] == (
+        "No. 12-1 Fuxing Lane, Xinhu Community, Jiazi Town, Lufeng City, "
+        "Guangdong Province, China"
+    ), d["residential_address"]  # Flat/Floor/Block and Building correctly omitted, not filled with label text
+    print("test_pi_nnc1_real_document_fullwidth_slash_and_blank_flat_building OK", d)
+
+
 def test_normalize_date_variants():
     assert normalize_date("15 March 2023")[0] == "2023-03-15"
     assert normalize_date("2023-03-15")[0] == "2023-03-15"
@@ -783,6 +859,7 @@ if __name__ == "__main__":
     test_pi_nnc1_filled_english_name_is_used_as_is_no_romanization()
     test_pi_nnc1_does_not_regress_simple_single_line_address_format()
     test_pi_nnc1_ignores_unrelated_sections_and_instructional_notes()
+    test_pi_nnc1_real_document_fullwidth_slash_and_blank_flat_building()
     test_normalize_date_variants()
     test_merge()
     test_merge_ubo_dedup_across_nnc1_and_nar1()

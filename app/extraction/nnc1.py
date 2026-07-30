@@ -46,7 +46,7 @@ _CORP_BLOCK_START_RE = re.compile(
 # On a PI-NNC1-style page, 中文姓名 is listed *before* Surname/Other Names;
 # widen a director block backward to include it when it's close by.
 _CHINESE_NAME_LABEL_RE = re.compile(
-    r"中文姓名(?:\s*/\s*Name\s*in\s*Chinese)?|Name\s*in\s*Chinese",
+    r"中文姓名(?:\s*[/／]\s*Name\s*in\s*Chinese)?|Name\s*in\s*Chinese",
     re.IGNORECASE,
 )
 # The PI-NNC1 attachment's page heading — one such page is one person's
@@ -56,8 +56,8 @@ _CHINESE_NAME_LABEL_RE = re.compile(
 # field asking for an "English or Chinese" name) and would otherwise be
 # mistaken for a second director.
 _PI_NNC1_PAGE_RE = re.compile(
-    r"首任公司秘書／?董事\s*\(自然人\)|"
-    r"First\s*Company\s*Secretary\s*/\s*Director\s*\(Individual\)",
+    r"首任公司秘書\s*[/／]?\s*董事\s*\(自然人\)|"
+    r"First\s*Company\s*Secretary\s*[/／]\s*Director\s*\((?:Individual|Natural\s*Person)\)",
     re.IGNORECASE,
 )
 
@@ -105,21 +105,40 @@ _TOTAL_SHARES_LABEL_RE = re.compile(
 _NUMBER_RE = re.compile(r"\b([0-9][0-9,]{2,})\b")
 
 # ---- PI-NNC1 field labels ----
+# Chinese label listed first in each tuple: on the real form the Chinese
+# label and its filled-in value share one row, while the English label is
+# a translation restated on its *own*, always-blank row further down. If
+# the English pattern were tried first, `_grab_line` would match that
+# later, value-less English row and then wrongly fall through to
+# whatever unrelated line comes after it. Each pattern also matches its
+# label's *full* text (including trailing "etc."/"／Region" filler) so a
+# blank field's match doesn't leave residual filler text ("etc.", "／
+# Region") behind that looks like real content.
 _ADDR_SECTION_RE = re.compile(
     r"董事的通常住址|Usual\s*Residential\s*Address(?:\s*of\s*Director)?",
     re.IGNORECASE,
 )
-_ADDR_FLAT_LABELS = (r"Flat\s*/\s*Floor\s*/\s*Block", r"室\s*/?\s*樓\s*/?\s*座")
-_ADDR_BUILDING_LABELS = (r"Building", r"大廈")
-_ADDR_STREET_LABELS = (r"Street", r"街道")
-_ADDR_DISTRICT_LABELS = (r"District\s*/\s*City\s*/\s*Province", r"地區\s*/?\s*市\s*/?\s*省")
-_ADDR_COUNTRY_LABELS = (r"Country", r"國家")
+_ADDR_FLAT_LABELS = (
+    r"室\s*[/／]?\s*樓\s*[/／]?\s*座\s*等?",
+    r"Flat\s*[/／]\s*Floor\s*[/／]\s*Block(?:\s*etc\.?)?",
+)
+_ADDR_BUILDING_LABELS = (r"大廈", r"Building")
+_ADDR_STREET_LABELS = (
+    r"街道\s*[/／]?\s*屋苑\s*[/／]?\s*地段\s*[/／]?\s*村\s*等?",
+    r"Street(?:\s*[/／]\s*Estate\s*[/／]\s*Lot\s*[/／]\s*Village)?(?:\s*etc\.?)?",
+)
+_ADDR_DISTRICT_LABELS = (
+    r"(?:地)?區\s*[/／]?\s*市\s*[/／]?\s*省\s*[/／]?\s*州\s*[/／]?\s*郵遞區號\s*等?",
+    r"District\s*[/／]\s*City\s*[/／]\s*Province\s*[/／]?",
+)
+_ADDR_COUNTRY_LABELS = (r"國家\s*[/／]?\s*地區", r"Country(?:\s*[/／]\s*Region)?")
 
 _HKID_LABELS = (
-    r"香港身份證(?:號碼)?", r"Hong\s*Kong\s*Identity\s*Card(?:\s*No\.?)?", r"HKID",
+    r"香港身[份分]證(?:號碼)?", r"Hong\s*Kong\s*Identity\s*Card(?:\s*No\.?)?", r"HKID",
 )
-_PASSPORT_FULL_NUMBER_LABELS = (r"完整號碼", r"Full\s*Number")
-_ISSUING_COUNTRY_LABELS = (r"簽發國家(?:\s*/\s*地區)?", r"Issuing\s*Country(?:\s*/\s*Region)?")
+_PASSPORT_FULL_NUMBER_LABELS = (r"完整\s*號碼", r"Full\s*Number")
+_ISSUING_COUNTRY_LABELS = (r"簽發國家(?:\s*[/／]\s*地區)?", r"Issuing\s*Country(?:\s*[/／]\s*Region)?")
+_PASSPORT_SECTION_RE = re.compile(r"\(\s*b\s*\)\s*護照|Passport", re.IGNORECASE)
 
 # Every label fragment used elsewhere in this module, plus a few
 # page-level headings/captions. A captured "value" made up entirely of one
@@ -137,19 +156,15 @@ _LABEL_FRAGMENTS = [
     r"建議採用的公司英文或中文名稱", r"建议采用的公司英文或中文名称",
     r"Proposed\s*Company\s*(?:English\s*or\s*Chinese|Chinese\s*or\s*English)\s*Name",
     r"或\s*OR", r"in\s*Hong\s*Kong", r"elsewhere",
-    r"身分識別", r"身份識別", r"Identification",
-    r"香港身份證(?:號碼)?", r"Hong\s*Kong\s*Identity\s*Card(?:\s*No\.?)?", r"HKID",
-    r"護照", r"Passport",
-    r"完整號碼", r"Full\s*Number",
-    r"簽發國家(?:\s*/\s*地區)?", r"Issuing\s*Country(?:\s*/\s*Region)?",
+    r"身[份分]識別", r"Identification",
     r"董事的通常住址", r"通常住址", r"Usual\s*Residential\s*Address(?:\s*of\s*Director)?",
     r"of\s*Director", r"Director", r"董事",
-    r"Flat\s*/\s*Floor\s*/\s*Block", r"室\s*/?\s*樓\s*/?\s*座",
-    r"Building", r"大廈", r"Street", r"街道",
-    r"District\s*/\s*City\s*/\s*Province", r"地區\s*/?\s*市\s*/?\s*省",
-    r"Country", r"國家",
-    r"PI-NNC1", r"首任公司秘書／?董事(?:\s*\(自然人\))?",
-    r"First\s*Company\s*Secretary\s*/\s*Director(?:\s*\(Individual\))?",
+    *_ADDR_FLAT_LABELS, *_ADDR_BUILDING_LABELS, *_ADDR_STREET_LABELS,
+    *_ADDR_DISTRICT_LABELS, *_ADDR_COUNTRY_LABELS,
+    *_HKID_LABELS, r"護照", r"Passport",
+    *_PASSPORT_FULL_NUMBER_LABELS, *_ISSUING_COUNTRY_LABELS,
+    r"PI-NNC1", r"首任公司秘書\s*[/／]?\s*董事(?:\s*\(自然人\))?",
+    r"First\s*Company\s*Secretary\s*[/／]\s*Director(?:\s*\((?:Individual|Natural\s*Person)\))?",
     r"受保護資料", r"Protected\s*Information",
     r"NIL",
 ]
@@ -170,20 +185,90 @@ _INSTRUCTION_NOISE_RE = re.compile(
     r"^\s*\(.*\)\s*$|Please\s*state|not\s*acceptable|Post\s*Office\s*Box",
     re.IGNORECASE,
 )
+# When a field's own value is blank, the capture can jump straight to the
+# *next* field's label+value row (e.g. an empty Surname followed by "名字
+# WENNA" — the Other Names label and its real value). Because that whole
+# string isn't *purely* label text, `_LABEL_NOISE_RE` alone doesn't catch
+# it. Reject anything that *starts* with a recognised label fragment too:
+# real field values never legitimately begin with another field's label.
+_LABEL_STARTS_RE = re.compile(
+    r"^\s*" + _LABEL_FRAGMENT_ALT + r"(?:[\s/／,，:：]|$)",
+    re.IGNORECASE,
+)
 
 
 def _is_label_noise(value: str) -> bool:
     if not value:
         return False
-    return bool(_LABEL_NOISE_RE.match(value) or _INSTRUCTION_NOISE_RE.search(value))
+    return bool(
+        _LABEL_NOISE_RE.match(value)
+        or _INSTRUCTION_NOISE_RE.search(value)
+        or _LABEL_STARTS_RE.match(value)
+    )
+
+
+# How close to the start of its own line a label match must be to count
+# as a genuine field label, not the same word buried mid-sentence inside
+# an instructional note (real PI-NNC1 pages carry notes like "...申報首任
+# 董事的香港身分證或護照的完整號碼及通常住址..." that contain several
+# field-label phrases in running prose well past this many characters in).
+_LABEL_LINE_PREFIX_MAX = 15
+
+# Whole lines of instructional prose to skip outright before even looking
+# for a label match on them. These carry field-label phrases (香港身分證,
+# 完整號碼, 通常住址...) close enough to their own line start to slip past
+# `_LABEL_LINE_PREFIX_MAX` (the Chinese notice lines are bullet-prefixed
+# short sentences, and the English translation "The full number of..."
+# puts "Hong Kong Identity Card"/"full number" within the first ~15
+# characters too), so position alone can't rule them out.
+_NOTE_LINE_RE = re.compile(
+    r"^\s*-\s|請於本頁申報|should\s*be\s*reported\s*on\s*this\s*page|"
+    r"^\s*The\s*full\s*number\s*of|公眾紀錄不會顯示|public\s*record",
+    re.IGNORECASE,
+)
+
+
+def _find_label_end(block: str, pattern: re.Pattern) -> int | None:
+    """Absolute offset right after the first match of `pattern` that
+    starts within `_LABEL_LINE_PREFIX_MAX` chars of its own line, skipping
+    whole lines of instructional prose (`_NOTE_LINE_RE`) -- or None if
+    there's no such match anywhere in `block`.
+    """
+    pos = 0
+    while pos <= len(block):
+        line_end = block.find("\n", pos)
+        line_end = len(block) if line_end == -1 else line_end
+        line = block[pos:line_end]
+        if not _NOTE_LINE_RE.search(line):
+            m = pattern.search(line)
+            if m and m.start() <= _LABEL_LINE_PREFIX_MAX:
+                return pos + m.end()
+        if line_end == len(block):
+            break
+        pos = line_end + 1
+    return None
+
+
+def _line_bounds(block: str, pos: int) -> tuple[int, int]:
+    end = block.find("\n", pos)
+    return pos, (len(block) if end == -1 else end)
 
 
 def _grab_line(block: str, *label_patterns: str) -> str:
     for lp in label_patterns:
-        pat = re.compile(lp + r"\s*[:.]?\s*\n?\s*([^\n]+)", re.IGNORECASE)
-        m = pat.search(block)
-        if m:
-            val = collapse_line(m.group(1))
+        pat = re.compile(lp, re.IGNORECASE)
+        end_pos = _find_label_end(block, pat)
+        if end_pos is None:
+            continue
+        _, line_end = _line_bounds(block, end_pos)
+        rest = re.sub(r"^\s*[:.：]?\s*", "", block[end_pos:line_end])
+        candidates = [rest] if rest.strip() else []
+        next_start = line_end + 1
+        if next_start < len(block):
+            _, next_end = _line_bounds(block, next_start)
+            candidates.append(block[next_start:next_end])
+        for cand in candidates:
+            val = collapse_line(cand)
             if val and not _is_label_noise(val):
                 return val
     return ""
@@ -244,21 +329,28 @@ def _split_by_positions(text: str, starts: list[int], end_limit: int) -> list[st
 
 
 def _split_director_blocks(text: str) -> list[str]:
-    stop_m = _STOP_SECTION_RE.search(text)
-    end_limit = stop_m.start() if stop_m else len(text)
-
     # Primary: one PI-NNC1 attachment page = one director. Scoping to the
     # page heading means field lookups below never wander into an
     # unrelated section (a proposed-company-name field, a different
     # director's page, ...) and mistake its label text for this person's
-    # data — the exact failure mode this design fixes.
-    page_starts = [m.start() for m in _PI_NNC1_PAGE_RE.finditer(text)]
+    # data — the exact failure mode this design fixes. PI-NNC1 pages sit
+    # near the *end* of a real NNC1 bundle (after every consent-to-act
+    # section), each of which has its own "簽署/Signed" line, so bound
+    # each block only by the next PI-NNC1 heading (or end of document for
+    # the last one) — not by _STOP_SECTION_RE, which would match one of
+    # those earlier "Signed" lines and wrongly truncate the block to
+    # nothing before the PI-NNC1 heading is even reached.
+    page_starts = _dedupe_close_starts(
+        [m.start() for m in _PI_NNC1_PAGE_RE.finditer(text)], min_gap=100
+    )
     if page_starts:
-        return _split_by_positions(text, page_starts, end_limit)
+        return _split_by_positions(text, page_starts, len(text))
 
     # Fallback: no PI-NNC1 attachment page found — the older, simpler
     # "Surname or Company Name" table-row format (one row per director,
     # no dedicated per-person page).
+    stop_m = _STOP_SECTION_RE.search(text)
+    end_limit = stop_m.start() if stop_m else len(text)
     surname_starts = _dedupe_close_starts([m.start() for m in _BLOCK_START_RE.finditer(text)])
     if not surname_starts:
         return []
@@ -297,10 +389,10 @@ _ADDR_FLAT_LABEL_RE = re.compile("|".join(_ADDR_FLAT_LABELS), re.IGNORECASE)
 
 
 def _grab_pi_nnc1_address(block: str) -> str:
-    m = _ADDR_SECTION_RE.search(block)
-    if not m:
+    end_pos = _find_label_end(block, _ADDR_SECTION_RE)
+    if end_pos is None:
         return ""
-    sub_block = block[m.end():]
+    sub_block = block[end_pos:]
     # Only treat this as the PI-NNC1 component layout (Flat/Floor/Block,
     # Building, Street, ...) when that first sub-label genuinely follows
     # close by. Otherwise this is the simpler "Residential Address: value"
@@ -323,29 +415,58 @@ def _grab_pi_nnc1_address(block: str) -> str:
     return ", ".join(p for p in parts if p)
 
 
+_GENERIC_ADDRESS_LABEL_RE = re.compile(
+    r"(?:Usual\s*)?Residential\s*Address(?:\s*of\s*Director)?", re.IGNORECASE
+)
+_GENERIC_ADDRESS_STOP_RE = re.compile(
+    r"Nationality|Identification|國籍|身[份分]", re.IGNORECASE
+)
+
+
 def _grab_generic_address(block: str) -> str:
     address = _grab_line(
         block, r"(?:Usual\s*)?Residential\s*Address(?:\s*of\s*Director)?", r"住[址所]"
     )
     if address:
         return address
-    m = re.search(
-        r"(?:Usual\s*)?Residential\s*Address(?:\s*of\s*Director)?\s*[:.]?\s*\n?"
-        r"([^\n]+(?:\n(?!\s*(?:Nationality|Identification|國籍|身份))[^\n]+){0,3})",
-        block,
-        re.IGNORECASE,
-    )
-    candidate = collapse_line(m.group(1)) if m else ""
+
+    end_pos = _find_label_end(block, _GENERIC_ADDRESS_LABEL_RE)
+    if end_pos is None:
+        return ""
+    _, line_end = _line_bounds(block, end_pos)
+    collected = []
+    first = re.sub(r"^\s*[:.：]?\s*", "", block[end_pos:line_end])
+    if first.strip():
+        collected.append(first)
+    cursor = line_end + 1
+    while cursor < len(block) and len(collected) < 4:
+        _, next_end = _line_bounds(block, cursor)
+        line = block[cursor:next_end]
+        if not line.strip() or _GENERIC_ADDRESS_STOP_RE.search(line):
+            break
+        collected.append(line)
+        cursor = next_end + 1
+    candidate = collapse_line(" ".join(collected))
     return candidate if candidate and not _is_label_noise(candidate) else ""
 
 
 def _grab_hkid(block: str) -> str:
     val = _grab_line(block, *_HKID_LABELS)
-    return "" if not val or val.strip().upper() == "NIL" else val
+    # strip the trailing "( )" check-digit box (empty when there's no
+    # HKID) before testing whether the cell is actually blank — the
+    # official form's own "nil" indicator is Chinese "無", not "NIL"
+    cleaned = re.sub(r"[\(\)（）\s]+", "", val or "")
+    return "" if not cleaned or cleaned.upper() == "NIL" or cleaned == "無" else val
 
 
 def _grab_passport_number(block: str) -> str:
-    return _grab_line(block, *_PASSPORT_FULL_NUMBER_LABELS)
+    # Scope to the "(b) 護照 / Passport" section: "完整號碼" (Full Number)
+    # also appears in a parenthetical gloss right next to the *HKID*
+    # label above it ("香港身分證(完整號碼)"), which is not the passport
+    # number field and would otherwise be matched first.
+    end_pos = _find_label_end(block, _PASSPORT_SECTION_RE)
+    sub_block = block[end_pos:] if end_pos is not None else block
+    return _grab_line(sub_block, *_PASSPORT_FULL_NUMBER_LABELS)
 
 
 def _grab_issuing_country(block: str) -> str:
@@ -368,12 +489,18 @@ def _classify_id_kind(hkid: str, passport_number: str, issuing_country: str) -> 
 def _parse_person_fields(block: str, source: str) -> dict:
     """Name/ID/address common to both a director entry and an individual
     shareholder entry."""
-    surname_en = _grab_line(block, r"Surname(?:\s*or\s*Company\s*Name)?")
+    # "Surname"/"Other Names" are tried first since they're unambiguous,
+    # but on some real forms the value sits on the row with the *Chinese*
+    # sub-label (姓氏/名字) instead — e.g. "英文姓名 姓氏 ZHANG" on one row
+    # with "Name in English Surname" (no value) on the next — so "姓氏"/
+    # "名字" are tried as a fallback anchor when the English one's capture
+    # turns out to be noise (the next field's label).
+    surname_en = _grab_line(block, r"Surname(?:\s*or\s*Company\s*Name)?", r"姓氏")
     given_en = _grab_line(
-        block, r"Other\s*Names?", r"Forename\(?s?\)?", r"Given\s*Name\(?s?\)?"
+        block, r"Other\s*Names?", r"Forename\(?s?\)?", r"Given\s*Name\(?s?\)?", r"名字"
     )
     chinese_name = _grab_line(
-        block, r"中文姓名(?:\s*/\s*Name\s*in\s*Chinese)?", r"Name\s*in\s*Chinese", r"Chinese\s*Name"
+        block, r"中文姓名(?:\s*[/／]\s*Name\s*in\s*Chinese)?", r"Name\s*in\s*Chinese", r"Chinese\s*Name"
     )
     if not chinese_name:
         cjk_m = _CJK_RE.search(block)
@@ -392,7 +519,7 @@ def _parse_person_fields(block: str, source: str) -> dict:
         id_info, id_issuing_country = passport_number, issuing_country
     else:
         id_info = _grab_line(
-            block, r"Identification", r"I\.?D\.?\s*No\.?", r"身份證明文件", r"身份证明文件"
+            block, r"Identification", r"I\.?D\.?\s*No\.?", r"身[份分]證明文件", r"身份证明文件"
         )
         id_issuing_country = ""
 
