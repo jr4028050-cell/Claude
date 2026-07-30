@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>香港主体材料信息提取</title>
+<style>
+  :root{
+    --ink:#1a1d21;--ink-2:#4a515b;--ink-3:#8b929c;
+    --line:#e2e5ea;--line-2:#eef0f3;
+    --paper:#ffffff;--bg:#f6f7f9;--panel:#fbfcfd;
+    --accent:#1f5fd6;--accent-soft:#eaf1fd;
+    --ok:#127a4b;--ok-soft:#e6f4ec;
+    --warn:#b25e00;--warn-soft:#fbf0e0;
+    --miss:#c0392b;--miss-soft:#fbeae8;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace;
+    --sans:"Inter","PingFang HK","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--ink);
+    -webkit-font-smoothing:antialiased;line-height:1.5;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* header */
+  header{border-bottom:1px solid var(--line);background:var(--paper)}
+  .head-in{display:flex;align-items:baseline;gap:14px;padding:20px 0}
+  .logo{font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    color:var(--accent);border:1px solid var(--accent);border-radius:4px;
+    padding:3px 8px;text-transform:uppercase}
+  h1{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .sub{font-size:12.5px;color:var(--ink-3);margin-left:auto}
+
+  main{padding:28px 0 60px}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:22px}
+
+  /* upload zones */
+  .zone{background:var(--paper);border:1px solid var(--line);border-radius:10px;
+    padding:18px;transition:border-color .15s}
+  .zone:hover{border-color:#cdd3db}
+  .zone-h{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+  .tag{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;
+    padding:2px 7px;border-radius:4px;background:var(--accent-soft);color:var(--accent)}
+  .zone-h b{font-size:13.5px;font-weight:600}
+  .zone p{font-size:12px;color:var(--ink-3);margin-bottom:14px;min-height:32px}
+  .drop{border:1.5px dashed var(--line);border-radius:8px;background:var(--panel);
+    padding:22px 14px;text-align:center;cursor:pointer;transition:.15s}
+  .drop:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .drop .ic{font-size:20px;color:var(--ink-3);margin-bottom:6px}
+  .drop .t{font-size:12.5px;color:var(--ink-2)}
+  .drop .t b{color:var(--accent);font-weight:600}
+  .files{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .files li{display:flex;align-items:center;gap:8px;font-size:12px;
+    background:var(--panel);border:1px solid var(--line-2);border-radius:6px;
+    padding:7px 10px;color:var(--ink-2)}
+  .files li .fi{color:var(--miss);cursor:pointer;margin-left:auto;font-family:var(--mono)}
+  .files .sz{color:var(--ink-3);font-family:var(--mono);font-size:11px}
+
+  /* action bar */
+  .bar{display:flex;align-items:center;gap:14px;padding:16px 20px;
+    background:var(--paper);border:1px solid var(--line);border-radius:10px;margin-bottom:24px}
+  .bar .note{font-size:12.5px;color:var(--ink-3)}
+  .btn{font-family:var(--sans);font-size:13.5px;font-weight:600;border:none;
+    border-radius:7px;padding:10px 20px;cursor:pointer;transition:.12s}
+  .btn-go{background:var(--accent);color:#fff;margin-left:auto}
+  .btn-go:hover{background:#1a52ba}
+  .btn-2{background:var(--paper);color:var(--ink-2);border:1px solid var(--line)}
+  .btn-2:hover{border-color:#cdd3db}
+
+  /* results */
+  .res{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .res-h{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .res-h h2{font-size:14.5px;font-weight:600}
+  .legend{display:flex;gap:14px;margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .dot{width:8px;height:8px;border-radius:2px;display:inline-block}
+  .d-ok{background:var(--ok)}.d-def{background:var(--accent)}
+  .d-warn{background:var(--warn)}.d-miss{background:var(--miss)}
+
+  .sect{padding:6px 20px 4px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--ink-3);background:var(--panel);
+    border-bottom:1px solid var(--line-2);padding-top:14px;padding-bottom:9px}
+
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;font-weight:600;letter-spacing:.04em;
+    color:var(--ink-3);text-transform:uppercase;padding:9px 20px;border-bottom:1px solid var(--line-2)}
+  td{padding:11px 20px;border-bottom:1px solid var(--line-2);font-size:13px;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .fld{color:var(--ink-2);width:190px}
+  .fld .req{color:var(--miss);margin-left:3px}
+  .val{font-weight:500}
+  .val input{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink);
+    border:1px solid transparent;background:transparent;border-radius:5px;
+    padding:5px 8px;width:100%;max-width:360px;transition:.12s}
+  .val input:hover{border-color:var(--line)}
+  .val input:focus{outline:none;border-color:var(--accent);background:var(--accent-soft)}
+  .val input.empty{background:var(--miss-soft)}
+  .src{width:150px}
+  .badge{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:2px 8px;
+    border-radius:20px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .b-ok{background:var(--ok-soft);color:var(--ok)}
+  .b-def{background:var(--accent-soft);color:var(--accent)}
+  .b-warn{background:var(--warn-soft);color:var(--warn)}
+  .b-miss{background:var(--miss-soft);color:var(--miss)}
+  .from{font-family:var(--mono);font-size:11px;color:var(--ink-3);width:90px}
+
+  .rep-card{border:1px solid var(--line);border-radius:8px;margin:14px 20px;overflow:hidden}
+  .rep-top{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line-2)}
+  .rep-top b{font-size:13px}
+  .primary-pick{margin-left:auto;font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+
+  .exports{display:flex;gap:10px;padding:18px 20px;border-top:1px solid var(--line);background:var(--panel)}
+  .exports .btn-2{display:inline-flex;align-items:center;gap:7px}
+
+  .empty{text-align:center;padding:70px 20px;color:var(--ink-3)}
+  .empty .ic{font-size:34px;margin-bottom:10px;opacity:.5}
+  .empty p{font-size:13px}
+  .hidden{display:none}
+
+  @media(max-width:860px){.grid{grid-template-columns:1fr}.fld{width:auto}.src,.from{display:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap head-in">
+    <span class="logo">HK · KYC</span>
+    <h1>香港主体材料信息提取</h1>
+    <span class="sub">上传 CI / BR / NNC1·NAR1 · 自动提取字段 · 逐项复核</span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- upload zones -->
+  <div class="grid">
+    <div class="zone">
+      <div class="zone-h"><span class="tag">CI</span><b>公司注册证书</b></div>
+      <p>Certificate of Incorporation。提供企业英文名称、注册号码、成立日期。</p>
+      <div class="drop" onclick="mock('ci')">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <ul class="files" id="f-ci"></ul>
+    </div>
+
+    <div class="zone">
+      <div class="zone-h"><span class="tag">BR</span><b>商业登记证</b></div>
+      <p>Business Registration。提供对外名称、经营地址、生效日期。</p>
+      <div class="drop" onclick="mock('br')">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <ul class="files" id="f-br"></ul>
+    </div>
+
+    <div class="zone">
+      <div class="zone-h"><span class="tag">NNC1 / NAR1</span><b>成立表格 / 周年申报</b></div>
+      <p>提供注册地址与董事/代表个人信息。可多份，取最新。</p>
+      <div class="drop" onclick="mock('nnc1')">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <ul class="files" id="f-nnc1"></ul>
+    </div>
+  </div>
+
+  <div class="bar">
+    <span class="note">已上传后点击开始提取。扫描件将自动转 OCR（繁体＋英文），耗时略长。</span>
+    <button class="btn btn-2" onclick="reset()">清空</button>
+    <button class="btn btn-go" onclick="run()">开始提取</button>
+  </div>
+
+  <!-- empty state -->
+  <div class="res" id="empty">
+    <div class="empty">
+      <div class="ic">⌗</div>
+      <p>上传材料并点击「开始提取」，结果将在此处逐字段列出，可直接编辑复核。</p>
+    </div>
+  </div>
+
+  <!-- results -->
+  <div class="res hidden" id="result">
+    <div class="res-h">
+      <h2>提取结果</h2>
+      <div class="legend">
+        <span><i class="dot d-ok"></i>已提取</span>
+        <span><i class="dot d-def"></i>默认值</span>
+        <span><i class="dot d-warn"></i>遮蔽</span>
+        <span><i class="dot d-miss"></i>缺失待补</span>
+      </div>
+    </div>
+
+    <div class="sect">企业信息</div>
+    <table><tbody id="ent"></tbody></table>
+
+    <div class="sect">企业代表</div>
+    <div id="reps"></div>
+
+    <div class="exports">
+      <button class="btn-2" onclick="alert('导出 JSON（含 source / status / raw）')">⤓ 导出 JSON</button>
+      <button class="btn-2" onclick="alert('导出 CSV（UTF-8 BOM，Excel 直接打开）')">⤓ 导出 CSV</button>
+      <span style="margin-left:auto;font-size:12px;color:var(--ink-3);align-self:center">
+        必填字段缺失或遮蔽时已高亮，请人工补录后再导出。</span>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // ---- demo state (前端交互演示，真实数据由后端提取返回) ----
+  const store={ci:[],br:[],nnc1:[]};
+  const demoFiles={
+    ci:[['CI_Gwen.pdf','88 KB']],
+    br:[['BR_2024.pdf','120 KB']],
+    nnc1:[['NNC1.pdf','210 KB'],['NAR1_2024.pdf','198 KB']]
+  };
+  function mock(k){ // 演示：点击即填入示例文件
+    store[k]=demoFiles[k].slice(); render(k);
+  }
+  function render(k){
+    const ul=document.getElementById('f-'+k);
+    ul.innerHTML=store[k].map((f,i)=>
+      `<li>▤ ${f[0]}<span class="sz">${f[1]}</span>
+       <span class="fi" onclick="rm('${k}',${i})">✕</span></li>`).join('');
+  }
+  function rm(k,i){store[k].splice(i,1);render(k);}
+  function reset(){for(const k in store){store[k]=[];render(k);}
+    document.getElementById('result').classList.add('hidden');
+    document.getElementById('empty').classList.remove('hidden');}
+
+  // ---- field data (演示提取结果) ----
+  const ent=[
+    ['企业英文名称',1,'GWEN INTERNATIONAL LIMITED','ok','CI'],
+    ['企业对外名称',0,'GWEN INTL','ok','BR'],
+    ['公司注册号码 (CRN)',1,'3012XXXX','ok','CI'],
+    ['成立日期',1,'2023-03-15','ok','CI'],
+    ['注册国家',0,'Hong Kong','def','rule'],
+    ['注册城市',1,'Hong Kong','def','rule'],
+    ['注册详细地址',1,'FLAT B, 12/F, ... CENTRAL, HONG KONG','ok','NAR1'],
+    ['经营国家',1,'Hong Kong','def','rule'],
+    ['经营详细地址',1,'','miss',''],
+  ];
+  const rep=[
+    ['代表姓氏（中文）',1,'陳','ok','NNC1'],
+    ['名字（中文）',1,'大文','ok','NNC1'],
+    ['英文姓氏',1,'CHAN','ok','NNC1'],
+    ['英文名字',1,'TAI MAN','ok','NNC1'],
+    ['职位',1,'Director','ok','NNC1'],
+    ['性别',1,'','miss',''],
+    ['国籍',1,'Chinese','ok','NNC1'],
+    ['居住国家',1,'Hong Kong','ok','NNC1'],
+    ['同国籍',0,'是','def','派生'],
+    ['居住地址',1,'ROOM 5, ... KOWLOON, HONG KONG','ok','NNC1'],
+    ['证件签发国家',1,'','miss',''],
+    ['出生日期',1,'','miss',''],
+    ['证件信息',1,'P12****（部分遮蔽）','warn','NNC1'],
+  ];
+  const B={ok:['b-ok','已提取'],def:['b-def','默认值'],warn:['b-warn','遮蔽'],miss:['b-miss','缺失']};
+  function row(f){
+    const [name,req,val,st,src]=f;
+    const empty=(st==='miss'||!val)?'empty':'';
+    const b=B[st];
+    return `<tr>
+      <td class="fld">${name}${req?'<span class="req">*</span>':''}</td>
+      <td class="val"><input class="${empty}" value="${val.replace(/"/g,'&quot;')}"
+        placeholder="${st==='miss'?'待人工补录':''}"></td>
+      <td class="src"><span class="badge ${b[0]}">${b[1]}</span></td>
+      <td class="from">${src||'—'}</td></tr>`;
+  }
+  function run(){
+    if(!store.ci.length&&!store.br.length&&!store.nnc1.length){
+      alert('请先上传至少一个文件');return;}
+    document.getElementById('empty').classList.add('hidden');
+    document.getElementById('result').classList.remove('hidden');
+    document.getElementById('ent').innerHTML=ent.map(row).join('');
+    document.getElementById('reps').innerHTML=
+      `<div class="rep-card">
+        <div class="rep-top"><b>代表 1 · CHAN TAI MAN</b>
+          <label class="primary-pick"><input type="radio" name="pri" checked> 设为主代表</label>
+        </div>
+        <table><tbody>${rep.map(row).join('')}</tbody></table>
+      </div>`;
+    document.getElementById('result').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+</script>
+</body>
+</html>

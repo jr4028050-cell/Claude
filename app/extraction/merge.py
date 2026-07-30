@@ -1,0 +1,302 @@
+"""Cross-file merge: applies PRD 第 5 节的 priority/default/derive/conflict
+rules to turn per-file extraction results into the final enterprise +
+representatives payload described in PRD 第 6 节.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from . import schema
+from .normalize import guess_country_from_address
+
+
+@dataclass
+class NNC1Source:
+    filename: str
+    doc_kind: str  # "NAR1" or "NNC1"
+    data: dict
+    recency_key: str = ""  # e.g. an extracted "made up to" date; used to pick the newest NAR1
+
+
+def _norm_key(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().upper())
+
+
+def _field_count_filled(record: dict) -> int:
+    return sum(1 for f in record.values() if isinstance(f, dict) and f.get("value"))
+
+
+def _director_key(director: dict) -> str:
+    return _norm_key(director["surname_en"]["value"]) + "|" + _norm_key(director["given_en"]["value"])
+
+
+def _ubo_key(ubo: dict) -> str:
+    if ubo.get("is_corporate"):
+        name = _norm_key(ubo["company_name"]["value"])
+        return f"CORP|{name}" if name else ""
+    surname = _norm_key(ubo["surname_en"]["value"])
+    given = _norm_key(ubo["given_en"]["value"])
+    return f"PERSON|{surname}|{given}" if (surname or given) else ""
+
+
+def _pick_reg_address(
+    business_address: dict, nnc1_sources: list[NNC1Source]
+) -> tuple[dict, list[dict]]:
+    """Registered address: BR's Address field is authoritative whenever
+    present (business rule: treat it as the single source of truth even
+    when NNC1/NAR1 disagree), falling back to the newest NAR1 > NNC1 only
+    when no BR file was uploaded.
+    """
+    nnc1_candidates = [s for s in nnc1_sources if s.data["registered_address"]["value"]]
+
+    if business_address["value"]:
+        chosen = business_address
+        distinct_values = {_norm_key(business_address["value"])} | {
+            _norm_key(s.data["registered_address"]["value"]) for s in nnc1_candidates
+        }
+        conflicts = []
+        if len(distinct_values) > 1:
+            conflicts.append({
+                "field": "enterprise.reg_address",
+                "chosen": chosen["value"],
+                "chosen_source": "BR",
+                "candidates": [{"value": chosen["value"], "source": "BR"}] + [
+                    {"value": s.data["registered_address"]["value"], "source": s.filename}
+                    for s in nnc1_candidates
+                ],
+            })
+        return chosen, conflicts
+
+    if not nnc1_candidates:
+        return schema.missing(), []
+
+    nar1_candidates = [s for s in nnc1_candidates if s.doc_kind == "NAR1"]
+    pool = nar1_candidates or nnc1_candidates
+    chosen_source = sorted(pool, key=lambda s: s.recency_key)[-1]
+    chosen = chosen_source.data["registered_address"]
+
+    distinct_values = {_norm_key(s.data["registered_address"]["value"]) for s in nnc1_candidates}
+    conflicts = []
+    if len(distinct_values) > 1:
+        conflicts.append({
+            "field": "enterprise.reg_address",
+            "chosen": chosen["value"],
+            "chosen_source": chosen_source.filename,
+            "candidates": [
+                {"value": s.data["registered_address"]["value"], "source": s.filename}
+                for s in nnc1_candidates
+            ],
+        })
+    return chosen, conflicts
+
+
+def _merge_directors(nnc1_sources: list[NNC1Source]) -> list[dict]:
+    """Merge director blocks across all NNC1/NAR1 files. When the same person
+    appears more than once (matched on English name), keep whichever record
+    is more complete, preferring the newest NAR1 on ties.
+    """
+    # NNC1 files processed first, newest NAR1 processed last so it
+    # overwrites older duplicates
+    ordered = sorted(
+        [s for s in nnc1_sources if s.doc_kind != "NAR1"], key=lambda s: s.recency_key
+    ) + sorted(
+        [s for s in nnc1_sources if s.doc_kind == "NAR1"], key=lambda s: s.recency_key
+    )
+
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for source in ordered:
+        for director in source.data["directors"]:
+            key = _director_key(director)
+            if not key.strip("|"):
+                continue
+            existing = merged.get(key)
+            if existing is None or _field_count_filled(director) >= _field_count_filled(existing):
+                merged[key] = director
+            if key not in order:
+                order.append(key)
+    return [merged[k] for k in order]
+
+
+def _apply_passports(directors: list[dict], passports: list[dict]) -> list[dict]:
+    """Passport 第 10.1 条: NNC1/PI-NNC1 carry no gender or date-of-birth
+    field at all (the HK Companies Registry simply doesn't collect them),
+    and a director's own ID number there is often masked or missing
+    outside the PI-NNC1 page. A passport upload matched to a director by
+    English name is the authoritative source for gender and DOB (added
+    fresh, since no other file provides them) and for id_info /
+    id_issuing_country (overwritten even if NNC1 already had a value,
+    since a photographed passport's own printed/MRZ number is more
+    reliable than a form field that's frequently partially masked).
+
+    Returns a new list of (shallow-copied) director dicts rather than
+    mutating `directors` in place — the director dicts here are the same
+    objects referenced from each NNC1Source's own parsed data, and
+    mutating them would corrupt that source data for any other caller
+    still holding onto it. Every returned director gets a gender/dob key
+    (missing() if no passport matched) so the schema shape is uniform
+    regardless of whether a passport was uploaded at all.
+    """
+    by_key = {}
+    for p in passports:
+        key = _director_key(p)
+        if key.strip("|"):
+            by_key[key] = p
+
+    result = []
+    for director in directors:
+        director = dict(director)
+        match = by_key.get(_director_key(director))
+        director["gender"] = match["gender"] if match else schema.missing()
+        director["dob"] = match["dob"] if match else schema.missing()
+        if match:
+            if match["id_info"]["value"]:
+                director["id_info"] = match["id_info"]
+            if match["id_issuing_country"]["value"]:
+                director["id_issuing_country"] = match["id_issuing_country"]
+        result.append(director)
+    return result
+
+
+def _merge_ubos(nnc1_sources: list[NNC1Source]) -> list[dict]:
+    """Merge UBO entries (already computed per-file, including their
+    shareholding_pct) across all NNC1/NAR1 files. Same person/company
+    matched across files keeps whichever record is more complete,
+    preferring the newest NAR1 on ties — mirrors _merge_directors.
+    """
+    ordered = sorted(
+        [s for s in nnc1_sources if s.doc_kind != "NAR1"], key=lambda s: s.recency_key
+    ) + sorted(
+        [s for s in nnc1_sources if s.doc_kind == "NAR1"], key=lambda s: s.recency_key
+    )
+
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for source in ordered:
+        for ubo in source.data.get("ubos", []):
+            key = _ubo_key(ubo)
+            if not key:
+                continue
+            existing = merged.get(key)
+            if existing is None or _field_count_filled(ubo) >= _field_count_filled(existing):
+                merged[key] = ubo
+            if key not in order:
+                order.append(key)
+    return [merged[k] for k in order]
+
+
+def merge(
+    ci_files: list[tuple[str, dict]],
+    br_files: list[tuple[str, dict]],
+    nnc1_sources: list[NNC1Source],
+    passport_files: list[tuple[str, dict]] | None = None,
+) -> dict:
+    conflicts: list[dict] = []
+    passports = [data for _, data in (passport_files or [])]
+
+    # --- enterprise: name_en (CI, fallback: none extracted elsewhere) ---
+    name_en = schema.missing()
+    for _, ci in ci_files:
+        if ci["name_en"]["value"]:
+            name_en = ci["name_en"]
+            break
+
+    # --- crn / incorp_date: CI only ---
+    crn = schema.missing()
+    incorp_date = schema.missing()
+    for _, ci in ci_files:
+        if ci["crn"]["value"] and not crn["value"]:
+            crn = ci["crn"]
+        if ci["incorp_date"]["value"] and not incorp_date["value"]:
+            incorp_date = ci["incorp_date"]
+
+    # --- CRN cross-validation: a BR number's leading digit group should
+    # equal the CI's CRN (both identify the same legal entity). A
+    # mismatch is usually an OCR digit misread on a scanned copy (0/O,
+    # 6/G, ...) rather than a real discrepancy, so it's surfaced as a
+    # conflict for manual review rather than silently preferred either way.
+    if crn["value"]:
+        for _, br in br_files:
+            br_number = br["br_number"]["value"]
+            if not br_number:
+                continue
+            br_prefix = br_number.split("-")[0]
+            if br_prefix and br_prefix != crn["value"]:
+                conflicts.append({
+                    "field": "enterprise.crn",
+                    "chosen": crn["value"],
+                    "chosen_source": "CI",
+                    "candidates": [
+                        {"value": crn["value"], "source": "CI"},
+                        {"value": br_prefix, "source": "BR"},
+                    ],
+                })
+            break
+
+    # --- trading name: BR business name, fallback to name_en ---
+    trading_name = schema.missing()
+    for _, br in br_files:
+        if br["trading_name"]["value"]:
+            trading_name = br["trading_name"]
+            break
+    if not trading_name["value"] and name_en["value"]:
+        trading_name = schema.inferred(name_en["value"], "name_en")
+
+    # --- reg_country / reg_city: rule defaults, always ---
+    reg_country = schema.default("Hong Kong / 中国香港")
+    reg_city = schema.default("Hong Kong")
+
+    # --- operating address: BR's Address/地址 field ---
+    business_address = schema.missing()
+    for _, br in br_files:
+        if br["business_address"]["value"]:
+            business_address = br["business_address"]
+            break
+
+    # --- reg_address: BR (authoritative) > latest NAR1 > NNC1 ---
+    reg_address, addr_conflicts = _pick_reg_address(business_address, nnc1_sources)
+    conflicts.extend(addr_conflicts)
+
+    # --- operating country / address: BR, else default / inferred from reg_address ---
+    if business_address["value"]:
+        guessed_country = guess_country_from_address(business_address["value"])
+        op_country_value = "Hong Kong / 中国香港" if guessed_country == "Hong Kong" else (guessed_country or "Hong Kong / 中国香港")
+        op_country = schema.extracted(op_country_value, "BR")
+        op_address = business_address
+    else:
+        op_country = schema.default("Hong Kong / 中国香港")
+        if reg_address["value"]:
+            op_address = schema.inferred(reg_address["value"], "reg_address")
+        else:
+            op_address = schema.missing()
+
+    enterprise = {
+        "name_en": name_en,
+        "trading_name": trading_name,
+        "crn": crn,
+        "incorp_date": incorp_date,
+        "reg_country": reg_country,
+        "reg_city": reg_city,
+        "reg_address": reg_address,
+        "op_country": op_country,
+        "op_address": op_address,
+    }
+
+    directors = _apply_passports(_merge_directors(nnc1_sources), passports)
+    ubos = _merge_ubos(nnc1_sources)
+
+    files = (
+        [f for f, _ in ci_files]
+        + [f for f, _ in br_files]
+        + [s.filename for s in nnc1_sources]
+        + [f for f, _ in (passport_files or [])]
+    )
+
+    return {
+        "enterprise": enterprise,
+        "directors": directors,
+        "ubos": ubos,
+        "conflicts": conflicts,
+        "files": files,
+    }
