@@ -119,6 +119,46 @@ def _merge_directors(nnc1_sources: list[NNC1Source]) -> list[dict]:
     return [merged[k] for k in order]
 
 
+def _apply_passports(directors: list[dict], passports: list[dict]) -> list[dict]:
+    """Passport 第 10.1 条: NNC1/PI-NNC1 carry no gender or date-of-birth
+    field at all (the HK Companies Registry simply doesn't collect them),
+    and a director's own ID number there is often masked or missing
+    outside the PI-NNC1 page. A passport upload matched to a director by
+    English name is the authoritative source for gender and DOB (added
+    fresh, since no other file provides them) and for id_info /
+    id_issuing_country (overwritten even if NNC1 already had a value,
+    since a photographed passport's own printed/MRZ number is more
+    reliable than a form field that's frequently partially masked).
+
+    Returns a new list of (shallow-copied) director dicts rather than
+    mutating `directors` in place — the director dicts here are the same
+    objects referenced from each NNC1Source's own parsed data, and
+    mutating them would corrupt that source data for any other caller
+    still holding onto it. Every returned director gets a gender/dob key
+    (missing() if no passport matched) so the schema shape is uniform
+    regardless of whether a passport was uploaded at all.
+    """
+    by_key = {}
+    for p in passports:
+        key = _director_key(p)
+        if key.strip("|"):
+            by_key[key] = p
+
+    result = []
+    for director in directors:
+        director = dict(director)
+        match = by_key.get(_director_key(director))
+        director["gender"] = match["gender"] if match else schema.missing()
+        director["dob"] = match["dob"] if match else schema.missing()
+        if match:
+            if match["id_info"]["value"]:
+                director["id_info"] = match["id_info"]
+            if match["id_issuing_country"]["value"]:
+                director["id_issuing_country"] = match["id_issuing_country"]
+        result.append(director)
+    return result
+
+
 def _merge_ubos(nnc1_sources: list[NNC1Source]) -> list[dict]:
     """Merge UBO entries (already computed per-file, including their
     shareholding_pct) across all NNC1/NAR1 files. Same person/company
@@ -150,8 +190,10 @@ def merge(
     ci_files: list[tuple[str, dict]],
     br_files: list[tuple[str, dict]],
     nnc1_sources: list[NNC1Source],
+    passport_files: list[tuple[str, dict]] | None = None,
 ) -> dict:
     conflicts: list[dict] = []
+    passports = [data for _, data in (passport_files or [])]
 
     # --- enterprise: name_en (CI, fallback: none extracted elsewhere) ---
     name_en = schema.missing()
@@ -241,13 +283,14 @@ def merge(
         "op_address": op_address,
     }
 
-    directors = _merge_directors(nnc1_sources)
+    directors = _apply_passports(_merge_directors(nnc1_sources), passports)
     ubos = _merge_ubos(nnc1_sources)
 
     files = (
         [f for f, _ in ci_files]
         + [f for f, _ in br_files]
         + [s.filename for s in nnc1_sources]
+        + [f for f, _ in (passport_files or [])]
     )
 
     return {

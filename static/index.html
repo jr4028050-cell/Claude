@@ -34,7 +34,7 @@
   .sub{font-size:12.5px;color:var(--ink-3);margin-left:auto}
 
   main{padding:28px 0 60px}
-  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:22px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px}
 
   /* upload zones */
   .zone{background:var(--paper);border:1px solid var(--line);border-radius:10px;
@@ -154,6 +154,7 @@
     border-top-color:var(--accent);margin:0 auto 14px;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
 
+  @media(max-width:1100px){.grid{grid-template-columns:1fr 1fr}}
   @media(max-width:860px){.grid{grid-template-columns:1fr}.fld{width:auto}.src,.from{display:none}}
 </style>
 </head>
@@ -163,7 +164,7 @@
   <div class="wrap head-in">
     <span class="logo">HK · KYC</span>
     <h1>香港主体材料信息提取</h1>
-    <span class="sub">上传 CI / BR / NNC1·NAR1 · 自动提取字段 · 逐项复核</span>
+    <span class="sub">上传 CI / BR / NNC1·NAR1 / 护照 · 自动提取字段 · 逐项复核</span>
   </div>
 </header>
 
@@ -202,6 +203,17 @@
       </div>
       <input type="file" id="input-nnc1" accept="application/pdf" multiple class="hidden">
       <ul class="files" id="f-nnc1"></ul>
+    </div>
+
+    <div class="zone">
+      <div class="zone-h"><span class="tag">护照/身份证</span><b>董事证件</b></div>
+      <p>NNC1/PI-NNC1 均不含性别、出生日期；证件号常缺失或遮蔽。提供性别、出生日期、完整证件号，按姓名匹配对应董事，权威覆盖。</p>
+      <div class="drop" id="drop-passport">
+        <div class="ic">↑</div>
+        <div class="t"><b>点击上传</b> 或拖入 PDF</div>
+      </div>
+      <input type="file" id="input-passport" accept="application/pdf" multiple class="hidden">
+      <ul class="files" id="f-passport"></ul>
     </div>
   </div>
 
@@ -265,8 +277,8 @@
 
 <script>
   // ---------- upload state ----------
-  const store = { ci: [], br: [], nnc1: [] };
-  const ZONES = ['ci', 'br', 'nnc1'];
+  const store = { ci: [], br: [], nnc1: [], passport: [] };
+  const ZONES = ['ci', 'br', 'nnc1', 'passport'];
 
   function fmtSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
@@ -332,7 +344,7 @@
   let lastResult = null; // raw backend payload, mutated in place as user edits
 
   async function runExtract() {
-    if (!store.ci.length && !store.br.length && !store.nnc1.length) {
+    if (ZONES.every(z => !store[z].length)) {
       alert('请先上传至少一个文件');
       return;
     }
@@ -340,6 +352,7 @@
     store.ci.forEach(f => fd.append('ci_files', f));
     store.br.forEach(f => fd.append('br_files', f));
     store.nnc1.forEach(f => fd.append('nnc1_files', f));
+    store.passport.forEach(f => fd.append('passport_files', f));
 
     document.getElementById('btn-run').disabled = true;
     document.getElementById('btn-reset').disabled = true;
@@ -382,6 +395,8 @@
     ['given_cn', '名字（中文）', false],
     ['surname_en', '英文姓氏', true],
     ['given_en', '英文名字', true],
+    ['gender', '性别', false],
+    ['dob', '出生日期', false],
     ['residential_address', '居住地址', true],
     ['id_info', '证件信息', true],
     ['id_issuing_country', '证件签发国家/地区', false],

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.extraction import br as br_rules
 from app.extraction import ci as ci_rules
 from app.extraction import nnc1 as nnc1_rules
+from app.extraction import passport as passport_rules
 from app.extraction.merge import NNC1Source, merge
 from app.extraction.normalize import normalize_date
 
@@ -994,6 +995,78 @@ def test_pi_nnc1_coordinate_extraction_from_real_pdf_layout():
     print("test_pi_nnc1_coordinate_extraction_from_real_pdf_layout OK", d)
 
 
+def test_passport_mrz_parsing():
+    """PRD 第 10.1 条: passport is the authoritative source for gender,
+    date of birth, and full ID number, none of which NNC1/PI-NNC1 carry
+    at all. Parses a hand-built (not OCR'd -- see passport.py's module
+    docstring for why the OCR/band-scanning step isn't covered by a
+    synthetic-image test) ICAO TD3 MRZ pair, mirroring the field
+    positions confirmed against a real PRC passport (line 1: P<CHN +
+    surname + << + given names; line 2: 9-char passport number, check
+    digit, 3-char nationality, YYMMDD DOB + check, sex, YYMMDD expiry +
+    check, then the personal-number block)."""
+    line1 = "P<CHNTEST<<PERSON" + "<" * 27
+    line2 = "X12345678" + "0" + "CHN" + "900101" + "0" + "F" + "300101" + "0" + "0" * 16
+    assert len(line1) == 44 and len(line2) == 44
+
+    r = passport_rules.parse_mrz(line1, line2)
+    assert r["surname_en"]["value"] == "TEST", r["surname_en"]
+    assert r["given_en"]["value"] == "PERSON", r["given_en"]
+    assert r["id_info"]["value"] == "X12345678", r["id_info"]
+    assert r["id_issuing_country"]["value"] == "China", r["id_issuing_country"]
+    assert r["gender"]["value"] == "Female", r["gender"]
+    assert r["dob"]["value"] == "1990-01-01", r["dob"]
+    assert r["expiry_date"]["value"] == "2030-01-01", r["expiry_date"]
+    for f in r.values():
+        assert f["source"] == "Passport" and f["status"] == "extracted", f
+
+    print("test_passport_mrz_parsing OK", r)
+
+
+def test_passport_missing_mrz_returns_all_missing():
+    r = passport_rules.empty_passport_fields()
+    for key, f in r.items():
+        assert f["value"] == "" and f["status"] == "missing", (key, f)
+    print("test_passport_missing_mrz_returns_all_missing OK")
+
+
+def test_merge_applies_passport_to_matching_director_by_name():
+    """A passport matched to a director by English name overrides
+    id_info/id_issuing_country (a photographed passport's own number is
+    more reliable than a form field that's frequently masked) and adds
+    gender/dob fresh (NNC1/PI-NNC1 have no such fields at all). A
+    director with no matching passport still gets gender/dob keys, just
+    'missing', so the schema shape is uniform either way."""
+    nnc1 = nnc1_rules.extract_nnc1(PI_NNC1_CHINA_ID_TEXT, source="NNC1")
+    passport = passport_rules.parse_mrz(
+        "P<CHNQIU<<HANCHENG" + "<" * 26,
+        "X98765432" + "0" + "CHN" + "850615" + "0" + "M" + "351231" + "0" + "0" * 16,
+    )
+    result = merge(
+        ci_files=[], br_files=[],
+        nnc1_sources=[NNC1Source(filename="NNC1.pdf", doc_kind="NNC1", data=nnc1, recency_key="0000-00-00")],
+        passport_files=[("passport.pdf", passport)],
+    )
+    d = result["directors"][0]
+    assert d["gender"]["value"] == "Male", d["gender"]
+    assert d["dob"]["value"] == "1985-06-15", d["dob"]
+    assert d["id_info"]["value"] == "X98765432", d["id_info"]
+    assert d["id_info"]["source"] == "Passport", d["id_info"]
+    assert d["id_issuing_country"]["value"] == "China", d["id_issuing_country"]
+
+    result_no_passport = merge(
+        ci_files=[], br_files=[],
+        nnc1_sources=[NNC1Source(filename="NNC1.pdf", doc_kind="NNC1", data=nnc1, recency_key="0000-00-00")],
+    )
+    d2 = result_no_passport["directors"][0]
+    assert d2["gender"]["status"] == "missing", d2["gender"]
+    assert d2["dob"]["status"] == "missing", d2["dob"]
+    # unmatched by passport -> NNC1's own (masked/partial) id_info stands
+    assert d2["id_info"]["value"] == nnc1["directors"][0]["id_info"]["value"], d2["id_info"]
+
+    print("test_merge_applies_passport_to_matching_director_by_name OK", d)
+
+
 def test_endpoint_smoke():
     """End-to-end smoke test: build tiny PDFs with reportlab and hit /api/extract."""
     try:
@@ -1056,5 +1129,8 @@ if __name__ == "__main__":
     test_pdf_text_layout_reconstruction_real_pdf()
     test_pdf_text_dedupes_overprinted_double_text_layer()
     test_pi_nnc1_coordinate_extraction_from_real_pdf_layout()
+    test_passport_mrz_parsing()
+    test_passport_missing_mrz_returns_all_missing()
+    test_merge_applies_passport_to_matching_director_by_name()
     test_endpoint_smoke()
     print("\nALL TESTS PASSED")

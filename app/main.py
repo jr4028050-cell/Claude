@@ -1,9 +1,10 @@
 """FastAPI backend for the HK entity material extraction tool.
 
 Serves the static frontend and exposes POST /api/extract, which accepts the
-three upload windows described in PRD 第 3 节 (CI / BR / NNC1·NAR1), runs
-text/OCR extraction + rule-based field parsing, merges results per PRD 第 5
-节, and returns the JSON payload described in PRD 第 6 节.
+four upload windows described in PRD 第 3 节 (CI / BR / NNC1·NAR1 /
+护照·身份证), runs text/OCR extraction + rule-based field parsing, merges
+results per PRD 第 5 节, and returns the JSON payload described in PRD 第 6
+节.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from app.extraction import br as br_rules
 from app.extraction import ci as ci_rules
 from app.extraction import nnc1 as nnc1_rules
+from app.extraction import passport as passport_rules
 from app.extraction.merge import NNC1Source, merge
 from app.extraction.normalize import normalize_date
 from app.extraction.pdf_text import extract_document_text
@@ -79,6 +81,7 @@ async def extract(
     ci_files: list[UploadFile] = File(default=[]),
     br_files: list[UploadFile] = File(default=[]),
     nnc1_files: list[UploadFile] = File(default=[]),
+    passport_files: list[UploadFile] = File(default=[]),
 ) -> dict:
     warnings: list[str] = []
 
@@ -121,7 +124,21 @@ async def extract(
             )
         )
 
-    if not ci_results and not br_results and not nnc1_sources:
+    passport_results = []
+    for upload in passport_files:
+        filename, data, warn = await _read_upload(upload)
+        if warn:
+            warnings.append(warn)
+        try:
+            parsed = passport_rules.extract_passport_from_pdf(data)
+        except Exception as exc:
+            parsed = passport_rules.empty_passport_fields()
+            warnings.append(f"{filename}: 护照识别失败（{exc}），性别/出生日期/证件号需人工补录。")
+        if not parsed["id_info"]["value"]:
+            warnings.append(f"{filename}: 未能识别护照机读区（MRZ），性别/出生日期/证件号需人工补录。")
+        passport_results.append((filename, parsed))
+
+    if not ci_results and not br_results and not nnc1_sources and not passport_results:
         return {
             "enterprise": {},
             "directors": [],
@@ -131,6 +148,6 @@ async def extract(
             "warnings": ["未收到任何文件"],
         }
 
-    result = merge(ci_results, br_results, nnc1_sources)
+    result = merge(ci_results, br_results, nnc1_sources, passport_results)
     result["warnings"] = warnings
     return result
