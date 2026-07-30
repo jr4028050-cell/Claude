@@ -169,6 +169,29 @@ def merge(
         if ci["incorp_date"]["value"] and not incorp_date["value"]:
             incorp_date = ci["incorp_date"]
 
+    # --- CRN cross-validation: a BR number's leading digit group should
+    # equal the CI's CRN (both identify the same legal entity). A
+    # mismatch is usually an OCR digit misread on a scanned copy (0/O,
+    # 6/G, ...) rather than a real discrepancy, so it's surfaced as a
+    # conflict for manual review rather than silently preferred either way.
+    if crn["value"]:
+        for _, br in br_files:
+            br_number = br["br_number"]["value"]
+            if not br_number:
+                continue
+            br_prefix = br_number.split("-")[0]
+            if br_prefix and br_prefix != crn["value"]:
+                conflicts.append({
+                    "field": "enterprise.crn",
+                    "chosen": crn["value"],
+                    "chosen_source": "CI",
+                    "candidates": [
+                        {"value": crn["value"], "source": "CI"},
+                        {"value": br_prefix, "source": "BR"},
+                    ],
+                })
+            break
+
     # --- trading name: BR business name, fallback to name_en ---
     trading_name = schema.missing()
     for _, br in br_files:

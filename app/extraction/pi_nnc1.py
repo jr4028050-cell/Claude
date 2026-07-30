@@ -38,7 +38,7 @@ import io
 import re
 
 from . import person_fields
-from .normalize import collapse_line
+from .coord_text import crop_value, find_word, find_word_any
 
 _PAGE_HEADING_RE = re.compile(r"^\s*PI-NNC1")
 _PROTECTED_INFO_RE = re.compile(r"Protected\s*Information|受保護資料", re.IGNORECASE)
@@ -115,22 +115,6 @@ def find_pi_nnc1_pages(pdf) -> list:
     return pages
 
 
-def _find_word(words: list[dict], keyword: str, y_min: float = 0.0) -> dict | None:
-    kw = keyword.lower()
-    for w in words:
-        if w["top"] >= y_min - 0.1 and kw in w["text"].lower():
-            return w
-    return None
-
-
-def _find_word_any(words: list[dict], keywords: tuple[str, ...], y_min: float = 0.0) -> dict | None:
-    for kw in keywords:
-        w = _find_word(words, kw, y_min)
-        if w is not None:
-            return w
-    return None
-
-
 def _fix_comma_spacing(text: str) -> str:
     # Some PDF exports lay a comma and the next character with ~zero gap
     # between them ("2304,23/F"), which pdfplumber then reads as a single
@@ -138,17 +122,6 @@ def _fix_comma_spacing(text: str) -> str:
     # ", " an address value should read with. Address values only (never
     # applied to names/IDs), since it would mangle a comma-grouped number.
     return re.sub(r",(?=\S)", ", ", text)
-
-
-def _crop_value(page, anchor_top: float, floor: float, x0: float, x1: float) -> str:
-    top = max(anchor_top - _WINDOW_ABOVE_PT, floor + 1.0, 0.0)
-    bottom = min(anchor_top + _WINDOW_BELOW_PT, page.height)
-    x0 = max(x0, 0.0)
-    x1 = min(x1, page.width)
-    if top >= bottom or x0 >= x1:
-        return ""
-    box = page.crop((x0, top, x1, bottom))
-    return collapse_line(box.extract_text() or "")
 
 
 def extract_pi_nnc1_person(page, source: str) -> dict:
@@ -168,9 +141,9 @@ def extract_pi_nnc1_person(page, source: str) -> dict:
     # Floor the very first search below the page's own heading/company-
     # name/instructional-note text (which can otherwise false-match e.g.
     # "Chinese" inside "...OR Chinese Company Name" up in the header).
-    protected = _find_word(words, "Protected")
+    protected = find_word(words, "Protected")
     floor = protected["bottom"] if protected else 0.0
-    capacity = _find_word(words, "Capacity", floor)
+    capacity = find_word(words, "Capacity", floor)
     floor = capacity["bottom"] if capacity else max(floor, page.height * 0.35)
 
     address_heading_seen = False
@@ -184,26 +157,26 @@ def extract_pi_nnc1_person(page, source: str) -> dict:
             # catches the tail of the heading itself ("...idential
             # Address of Director") ahead of the real Flat/Floor/Block
             # value.
-            heading = _find_word_any(words, ("Residential", "通常住址"), floor)
+            heading = find_word_any(words, ("Residential", "通常住址"), floor)
             floor = heading["bottom"] if heading else max(floor, page.height * 0.65)
             address_heading_seen = True
 
         x0, x1 = col_bounds[column]
-        anchor = _find_word_any(words, (primary, *alts), floor)
+        anchor = find_word_any(words, (primary, *alts), floor)
         if anchor is not None:
-            value = _crop_value(page, anchor["top"], floor, x0, x1)
+            value = crop_value(page, anchor["top"], floor, x0, x1, _WINDOW_ABOVE_PT, _WINDOW_BELOW_PT)
             floor = anchor["bottom"]
         else:
             ratio_top = page.height * _RATIO_FALLBACK[key]
-            value = _crop_value(page, ratio_top, floor, x0, x1)
+            value = crop_value(page, ratio_top, floor, x0, x1, _WINDOW_ABOVE_PT, _WINDOW_BELOW_PT)
             floor = max(floor, ratio_top)
         if column == "address" and value:
             value = _fix_comma_spacing(value)
         raw[key] = value
 
     hkid = person_fields.clean_hkid_value(raw["hkid_raw"])
-    residential_address = ", ".join(
-        p for p in (raw["flat"], raw["building"], raw["street"], raw["district"], raw["country"]) if p
+    residential_address = person_fields.assemble_address(
+        raw["flat"], raw["building"], raw["street"], raw["district"], raw["country"]
     )
 
     return person_fields.build_person_fields(

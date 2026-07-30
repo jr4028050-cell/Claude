@@ -26,6 +26,7 @@ import re
 from . import person_fields, schema
 from .normalize import clean_whitespace, collapse_line
 from .pi_nnc1 import extract_directors_from_pdf
+from .registered_office import extract_registered_office_from_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -674,7 +675,24 @@ def _directors_from_text(text: str, source: str) -> list[dict]:
 def extract_nnc1(text: str, source: str = "NNC1", pdf_bytes: bytes | None = None) -> dict:
     text = clean_whitespace(text or "")
 
-    registered_address = _extract_registered_office(text, source)
+    # Real PDFs: crop the "Proposed Address of the Company's Registered
+    # Office" section by coordinate, for the same reason as the director
+    # page below -- see registered_office.py. Falls back to the legacy
+    # text-block regex when there's no PDF (plain-text fixtures) or it
+    # finds no such section (scanned/OCR'd documents, NAR1s that phrase
+    # this differently, etc).
+    registered_address_value = ""
+    if pdf_bytes:
+        try:
+            registered_address_value = extract_registered_office_from_pdf(pdf_bytes)
+        except Exception:
+            logger.warning("coordinate-based registered-office extraction failed for %s", source, exc_info=True)
+            registered_address_value = ""
+    registered_address = (
+        schema.extracted(registered_address_value, source)
+        if registered_address_value
+        else _extract_registered_office(text, source)
+    )
 
     # Real PDFs: crop each PI-NNC1 "Protected Information" page by
     # coordinate rather than regex-matching the flattened text stream —

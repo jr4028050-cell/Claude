@@ -24,6 +24,8 @@ from . import romanize, schema
 from .normalize import looks_masked
 
 _HK_ID_BLANK_VALUES = ("NIL", "無")
+_CJK_CHAR_RE = re.compile(r"[一-鿿]")
+_CJK_DOMINANT_THRESHOLD = 0.3
 
 
 def split_chinese_name(name: str) -> tuple[str, str]:
@@ -33,6 +35,33 @@ def split_chinese_name(name: str) -> tuple[str, str]:
     if len(name) == 1:
         return name, ""
     return name[0], name[1:]
+
+
+def assemble_address(flat: str, building: str, street: str, district: str, country: str) -> str:
+    """Join the five PI-NNC1/registered-office address boxes (Flat/Floor/
+    Block, Building, Street, District/City/Province, Country) in whichever
+    order and punctuation actually matches how the values were written.
+
+    A director filling in the form with an English address writes it
+    specific-to-general the Western way ("FLAT 2304, 23/F, HO KING,
+    COMMERCIAL CENTRE, ... Hong Kong") — that's `parts` order, comma-
+    joined. But when the values are Chinese, real filings write general-
+    to-specific with no separator at all ("香港火炭黃竹洋街14至18號華生大
+    廈A座15樓01室A133") — the exact reverse order, concatenated directly.
+    Guessing the wrong convention for a Chinese address doesn't just
+    misorder it, it also litters it with commas that don't belong.
+    Detected from the values themselves (which language dominates the
+    non-empty parts) rather than fixed per-field, since either language
+    can appear in either field depending on how the filer wrote it.
+    """
+    parts = [p for p in (flat, building, street, district, country) if p]
+    if not parts:
+        return ""
+    total = sum(len(p) for p in parts)
+    cjk = sum(len(_CJK_CHAR_RE.findall(p)) for p in parts)
+    if total and cjk / total > _CJK_DOMINANT_THRESHOLD:
+        return "".join(reversed(parts))
+    return ", ".join(parts)
 
 
 def clean_hkid_value(raw: str) -> str:

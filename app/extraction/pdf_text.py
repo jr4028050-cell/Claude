@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from dataclasses import dataclass, field
 
 import pdfplumber
@@ -126,6 +127,22 @@ def _extract_text_layer(pdf_bytes: bytes) -> list[str]:
     return pages
 
 
+# Tesseract has no notion of CJK "word" grouping the way it does for
+# space-delimited Latin text -- image_to_data returns each Chinese
+# character as its own box, so `_words_to_layout_text` (which always
+# inserts at least a single space between same-row boxes) ends up
+# spacing every hanzi apart ("香 港 火 炭"). Chinese text never uses
+# spaces between characters within a phrase, so collapsing whitespace
+# specifically between two CJK characters is always safe and undoes
+# this without touching genuine word boundaries (English words, or a
+# real gap between a Chinese phrase and a following Latin one).
+_CJK_GAP_RE = re.compile(r"(?<=[一-鿿])\s+(?=[一-鿿])")
+
+
+def _collapse_cjk_spacing(text: str) -> str:
+    return _CJK_GAP_RE.sub("", text)
+
+
 def _ocr_page_text(image) -> str:
     import pytesseract
 
@@ -140,7 +157,8 @@ def _ocr_page_text(image) -> str:
         x0 = float(data["left"][i])
         top = float(data["top"][i])
         boxes.append({"text": text, "x0": x0, "x1": x0 + float(data["width"][i]), "top": top})
-    return _words_to_layout_text(boxes, _ROW_Y_TOLERANCE_OCR_PX, _COLUMN_GAP_OCR_PX)
+    text = _words_to_layout_text(boxes, _ROW_Y_TOLERANCE_OCR_PX, _COLUMN_GAP_OCR_PX)
+    return _collapse_cjk_spacing(text)
 
 
 def _ocr_pages(pdf_bytes: bytes) -> list[str]:

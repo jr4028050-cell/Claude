@@ -654,12 +654,43 @@ def test_merge():
     assert ent["reg_address"]["source"] == "BR"
     assert ent["reg_address"]["status"] == "extracted"
     assert ent["op_address"]["value"] == br["business_address"]["value"]
-    assert len(result["conflicts"]) == 1
-    assert result["conflicts"][0]["field"] == "enterprise.reg_address"
+    # Two conflicts: the reg_address disagreement (see above), plus CI's
+    # CRN (3012345) not matching BR's number's own CRN prefix (30123456)
+    # in these fixtures -- itself a real, deliberately-uncorrected
+    # mismatch this test also uses to cover CRN cross-validation.
+    conflict_fields = {c["field"] for c in result["conflicts"]}
+    assert conflict_fields == {"enterprise.reg_address", "enterprise.crn"}, result["conflicts"]
     assert len(result["directors"]) == 2
     assert len(result["ubos"]) == 2
     assert result["files"] == ["CI.pdf", "BR.pdf", "NNC1.pdf"]
     print("test_merge OK", ent, result["conflicts"])
+
+
+def test_merge_crn_cross_validation():
+    """PRD A.3 #2: CI's CRN should equal BR's registration-number prefix
+    (both identify the same legal entity) -- flagged as a conflict when
+    they don't, since a mismatch usually means an OCR digit misread
+    (0/O, 6/G, ...) on a scanned copy rather than a real discrepancy."""
+    ci = ci_rules.extract_ci(
+        "CERTIFICATE OF INCORPORATION\nNo. 80542846\nI hereby certify that\nMATCHCO LIMITED\n"
+        "is incorporated in Hong Kong on this date of 3 June 2026."
+    )
+    br_match = br_rules.extract_br(
+        "Business Registration Number: 80542846-000-06-26-0\nName of Business: MATCHCO LIMITED"
+    )
+    result = merge(ci_files=[("CI.pdf", ci)], br_files=[("BR.pdf", br_match)], nnc1_sources=[])
+    assert result["conflicts"] == [], result["conflicts"]
+
+    br_mismatch = br_rules.extract_br(
+        "Business Registration Number: 12345678-000-06-26-0\nName of Business: MATCHCO LIMITED"
+    )
+    result2 = merge(ci_files=[("CI.pdf", ci)], br_files=[("BR.pdf", br_mismatch)], nnc1_sources=[])
+    assert len(result2["conflicts"]) == 1, result2["conflicts"]
+    conflict = result2["conflicts"][0]
+    assert conflict["field"] == "enterprise.crn", conflict
+    assert conflict["chosen"] == "80542846", conflict
+    assert {c["value"] for c in conflict["candidates"]} == {"80542846", "12345678"}, conflict
+    print("test_merge_crn_cross_validation OK", result["conflicts"], result2["conflicts"])
 
 
 def test_merge_ubo_dedup_across_nnc1_and_nar1():
@@ -1020,6 +1051,7 @@ if __name__ == "__main__":
     test_pi_nnc1_real_document_fullwidth_slash_and_blank_flat_building()
     test_normalize_date_variants()
     test_merge()
+    test_merge_crn_cross_validation()
     test_merge_ubo_dedup_across_nnc1_and_nar1()
     test_pdf_text_layout_reconstruction_real_pdf()
     test_pdf_text_dedupes_overprinted_double_text_layer()
