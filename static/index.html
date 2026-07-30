@@ -99,13 +99,25 @@
   .fld{color:var(--ink-2);width:190px}
   .fld .req{color:var(--miss);margin-left:3px}
   .val{font-weight:500}
+  .val-wrap{display:flex;align-items:center;gap:2px;width:100%;max-width:380px}
   .val input{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink);
     border:1px solid transparent;background:transparent;border-radius:5px;
-    padding:5px 8px;width:100%;max-width:360px;transition:.12s}
+    padding:5px 8px;width:100%;min-width:0;flex:1;transition:.12s}
   .val input:hover{border-color:var(--line)}
   .val input:focus{outline:none;border-color:var(--accent);background:var(--accent-soft)}
   .val input.empty{background:var(--miss-soft)}
   .val input.na{background:var(--na-soft);color:var(--ink-3)}
+  .copy-btn{flex:none;position:relative;width:22px;height:22px;display:inline-flex;
+    align-items:center;justify-content:center;border:1px solid transparent;border-radius:5px;
+    background:transparent;color:var(--ink-3);opacity:.5;cursor:pointer;transition:.12s}
+  .copy-btn:hover:not(:disabled){opacity:1;border-color:var(--line);background:var(--panel);color:var(--accent)}
+  .copy-btn:disabled{opacity:.2;cursor:not-allowed}
+  .copy-btn.copied{opacity:1;color:var(--ok)}
+  .copy-ic{display:inline-flex;line-height:0}
+  .copy-tip{position:absolute;bottom:100%;left:50%;margin-bottom:5px;transform:translateX(-50%);
+    background:var(--ink);color:#fff;font-size:10.5px;font-weight:500;white-space:nowrap;
+    padding:2px 7px;border-radius:4px;opacity:0;pointer-events:none;transition:opacity .15s}
+  .copy-btn.copied .copy-tip{opacity:1}
   .src{width:150px}
   .badge{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:2px 8px;
     border-radius:20px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
@@ -396,18 +408,67 @@
     na: ['b-na', '不适用'],
   };
 
+  const ICON_COPY = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+    '<rect x="5.5" y="5.5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/>' +
+    '<path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.3"/></svg>';
+  const ICON_CHECK = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M3 8.5l3.2 3.2L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
   function fieldRow(scope, idx, key, label, required, f) {
     f = f || { value: '', source: '', status: 'missing' };
     const naCls = f.status === 'na' ? 'na' : '';
     const empty = (!f.value && f.status !== 'na') ? 'empty' : '';
     const b = BADGE[f.status] || BADGE.missing;
+    const fid = `${scope}-${idx}-${key}`;
     return `<tr>
       <td class="fld">${escapeHtml(label)}${required ? '<span class="req">*</span>' : ''}</td>
-      <td class="val"><input class="${empty} ${naCls}" data-scope="${scope}" data-idx="${idx}" data-key="${key}"
-        value="${escapeHtml(f.value)}"
-        placeholder="${f.status === 'missing' ? '待人工补录' : (f.status === 'na' ? '不适用' : '')}"></td>
-      <td class="src"><span class="badge ${b[0]}" data-badge-for="${scope}-${idx}-${key}">${b[1]}</span></td>
+      <td class="val"><div class="val-wrap">
+        <input class="${empty} ${naCls}" data-scope="${scope}" data-idx="${idx}" data-key="${key}"
+          value="${escapeHtml(f.value)}"
+          placeholder="${f.status === 'missing' ? '待人工补录' : (f.status === 'na' ? '不适用' : '')}">
+        <button type="button" class="copy-btn" data-copy-for="${fid}" title="复制" ${f.value ? '' : 'disabled'}>
+          <span class="copy-ic">${ICON_COPY}</span><span class="copy-tip">已复制</span>
+        </button>
+      </div></td>
+      <td class="src"><span class="badge ${b[0]}" data-badge-for="${fid}">${b[1]}</span></td>
       <td class="from">${escapeHtml(f.source) || '—'}</td></tr>`;
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+  }
+
+  function onCopyClick(e) {
+    const btn = e.currentTarget;
+    if (btn.disabled) return;
+    const input = btn.closest('.val-wrap').querySelector('input');
+    const text = input ? input.value : '';
+    if (!text) return;
+
+    const showCopied = () => {
+      const ic = btn.querySelector('.copy-ic');
+      btn.classList.add('copied');
+      ic.innerHTML = ICON_CHECK;
+      clearTimeout(btn._copyTimer);
+      btn._copyTimer = setTimeout(() => {
+        btn.classList.remove('copied');
+        ic.innerHTML = ICON_COPY;
+      }, 1200);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(showCopied).catch(() => { fallbackCopy(text); showCopied(); });
+    } else {
+      fallbackCopy(text);
+      showCopied();
+    }
   }
 
   function renderResult(data) {
@@ -462,6 +523,9 @@
     document.querySelectorAll('#ent input, #directors input[data-scope], #ubos input[data-scope]').forEach(input => {
       input.addEventListener('input', onFieldEdit);
     });
+    document.querySelectorAll('#ent .copy-btn, #directors .copy-btn, #ubos .copy-btn').forEach(btn => {
+      btn.addEventListener('click', onCopyClick);
+    });
   }
 
   function onFieldEdit(e) {
@@ -487,6 +551,8 @@
       badgeEl.className = `badge ${b[0]}`;
       badgeEl.textContent = b[1];
     }
+    const copyBtn = document.querySelector(`.copy-btn[data-copy-for="${scope}-${idx}-${key}"]`);
+    if (copyBtn) copyBtn.disabled = !newVal;
   }
 
   function primaryRepIndex() {
