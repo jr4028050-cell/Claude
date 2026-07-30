@@ -1,27 +1,33 @@
 """NNC1 (incorporation form) / NAR1 (annual return) field extraction.
 
 Provides the registered office address, one block per director, and the
-computed UBO (beneficial owner) list. Layout is inherently the least
-standardised of the three document types (free-text sections, repeating
-director/shareholder blocks), so this parser leans on label anchoring
-rather than fixed coordinates.
+computed UBO (beneficial owner) list.
 
-Director particulars are commonly recorded on a "PI-NNC1" style page per
-person (首任公司秘書／董事(自然人)- 受保護資料 / First Company Secretary /
-Director) with bilingual field labels: 中文姓名/Name in Chinese, then
-Surname/Other Names under 英文姓名/Name in English, an Identification
-block (Hong Kong ID, or a passport's Full Number + Issuing Country when
-the HKID cell is "NIL"), and a Usual Residential Address broken into
-Flat/Floor/Block, Building, Street, District/City/Province, Country. Every
-value grab below is guarded by `_is_label_noise` so a blank field can never
-be mistaken for the label text sitting next to it (see `_grab_line`).
+Director particulars belong on a "PI-NNC1" page per person (首任公司秘
+書／董事(自然人)- 受保護資料 / First Company Secretary / Director), a
+fixed-position Companies Registry template — see `pi_nnc1.py`, which
+crops that page's fields by coordinate and is the primary path whenever
+the caller has the original PDF bytes (`extract_nnc1(..., pdf_bytes=…)`).
+The label-anchored text-block parsing in this module (`_parse_director_block`
+and everything it calls) is now only the *fallback*: used for scanned/
+OCR'd documents (where there's no real coordinate layer to crop) and for
+any document with no recognisable PI-NNC1 page. It's also still how
+individual shareholder/founder-member blocks are parsed — those live in
+the main body of the form, not on a fixed-position page — and how the
+test suite exercises this logic without a real PDF fixture. Every value
+grab below is guarded by `_is_label_noise` so a blank field can never be
+mistaken for the label text sitting next to it (see `_grab_line`).
 """
 from __future__ import annotations
 
+import logging
 import re
 
-from . import romanize, schema
-from .normalize import clean_whitespace, collapse_line, looks_masked
+from . import person_fields, schema
+from .normalize import clean_whitespace, collapse_line
+from .pi_nnc1 import extract_directors_from_pdf
+
+logger = logging.getLogger(__name__)
 
 UBO_THRESHOLD_PCT = 25.0
 
@@ -376,15 +382,6 @@ def _split_director_blocks(text: str) -> list[str]:
     return blocks
 
 
-def _split_chinese_name(name: str) -> tuple[str, str]:
-    if not name:
-        return "", ""
-    name = name.strip()
-    if len(name) == 1:
-        return name, ""
-    return name[0], name[1:]
-
-
 _ADDR_FLAT_LABEL_RE = re.compile("|".join(_ADDR_FLAT_LABELS), re.IGNORECASE)
 
 
@@ -452,11 +449,7 @@ def _grab_generic_address(block: str) -> str:
 
 def _grab_hkid(block: str) -> str:
     val = _grab_line(block, *_HKID_LABELS)
-    # strip the trailing "( )" check-digit box (empty when there's no
-    # HKID) before testing whether the cell is actually blank — the
-    # official form's own "nil" indicator is Chinese "無", not "NIL"
-    cleaned = re.sub(r"[\(\)（）\s]+", "", val or "")
-    return "" if not cleaned or cleaned.upper() == "NIL" or cleaned == "無" else val
+    return person_fields.clean_hkid_value(val)
 
 
 def _grab_passport_number(block: str) -> str:
@@ -471,19 +464,6 @@ def _grab_passport_number(block: str) -> str:
 
 def _grab_issuing_country(block: str) -> str:
     return _grab_line(block, *_ISSUING_COUNTRY_LABELS)
-
-
-def _looks_like_china(country: str) -> bool:
-    c = re.sub(r"\s+", "", (country or "")).lower()
-    return c in ("china", "中国", "中國", "prc", "peoplesrepublicofchina", "mainlandchina")
-
-
-def _classify_id_kind(hkid: str, passport_number: str, issuing_country: str) -> str | None:
-    if hkid:
-        return "hk"
-    if passport_number and _looks_like_china(issuing_country):
-        return "china"
-    return None
 
 
 def _parse_person_fields(block: str, source: str) -> dict:
@@ -505,72 +485,23 @@ def _parse_person_fields(block: str, source: str) -> dict:
     if not chinese_name:
         cjk_m = _CJK_RE.search(block)
         chinese_name = cjk_m.group(0) if cjk_m else ""
-    surname_cn, given_cn = _split_chinese_name(chinese_name)
 
     residential_address = _grab_pi_nnc1_address(block) or _grab_generic_address(block)
 
     hkid = _grab_hkid(block)
     passport_number = _grab_passport_number(block)
     issuing_country = _grab_issuing_country(block)
+    # Generic fallback for layouts that record some other ID string
+    # without the PI-NNC1 HKID/passport structure (e.g. a bare
+    # "Identification: P1234567(HK)" line).
+    id_info_fallback = _grab_line(
+        block, r"Identification", r"I\.?D\.?\s*No\.?", r"身[份分]證明文件", r"身份证明文件"
+    )
 
-    if hkid:
-        id_info, id_issuing_country = hkid, "Hong Kong"
-    elif passport_number:
-        id_info, id_issuing_country = passport_number, issuing_country
-    else:
-        id_info = _grab_line(
-            block, r"Identification", r"I\.?D\.?\s*No\.?", r"身[份分]證明文件", r"身份证明文件"
-        )
-        id_issuing_country = ""
-
-    id_status = schema.STATUS_MISSING
-    if id_info:
-        id_status = schema.STATUS_MASKED if looks_masked(id_info) else schema.STATUS_EXTRACTED
-
-    surname_field = schema.extracted(surname_en, source) if surname_en else schema.missing()
-    given_field = schema.extracted(given_en, source) if given_en else schema.missing()
-
-    # English name left blank on the document -> suggest a romanization of
-    # the Chinese name, picking the scheme by the ID actually on file.
-    # Always flagged for human confirmation, never treated as extracted.
-    if not surname_en and not given_en and chinese_name:
-        id_kind = _classify_id_kind(hkid, passport_number, issuing_country)
-        if id_kind == "china":
-            guess = romanize.mandarin_pinyin_name(chinese_name)
-            if guess:
-                g_surname, g_given = guess
-                surname_field = schema.inferred(g_surname, "拼音推断")
-                given_field = schema.inferred(g_given, "拼音推断") if g_given else schema.missing()
-        elif id_kind == "hk":
-            guess = romanize.cantonese_suggested_name(chinese_name)
-            if guess:
-                g_surname, g_given = guess
-                surname_field = schema.suggested(g_surname, "粤语拼音建议·待确认")
-                given_field = (
-                    schema.suggested(g_given, "粤语拼音建议·待确认") if g_given else schema.missing()
-                )
-
-    return {
-        "surname_en": surname_en,
-        "given_en": given_en,
-        "surname_cn": surname_cn,
-        "given_cn": given_cn,
-        "fields": {
-            "surname_cn": schema.extracted(surname_cn, source) if surname_cn else schema.missing(),
-            "given_cn": schema.extracted(given_cn, source) if given_cn else schema.missing(),
-            "surname_en": surname_field,
-            "given_en": given_field,
-            "residential_address": (
-                schema.extracted(residential_address, source) if residential_address else schema.missing()
-            ),
-            "id_info": (
-                schema.field(id_info, source, id_status) if id_info else schema.missing()
-            ),
-            "id_issuing_country": (
-                schema.extracted(id_issuing_country, source) if id_issuing_country else schema.missing()
-            ),
-        },
-    }
+    return person_fields.build_person_fields(
+        surname_en, given_en, chinese_name, residential_address,
+        hkid, passport_number, issuing_country, source, id_info_fallback,
+    )
 
 
 def _parse_director_block(block: str, source: str) -> dict:
@@ -726,11 +657,7 @@ def _build_ubos(shareholders: list[dict], total_shares: int | None, source: str)
     return ubos
 
 
-def extract_nnc1(text: str, source: str = "NNC1") -> dict:
-    text = clean_whitespace(text or "")
-
-    registered_address = _extract_registered_office(text, source)
-
+def _directors_from_text(text: str, source: str) -> list[dict]:
     blocks = _split_director_blocks(text)
     # A block that also carries a "Number of Shares" field belongs to the
     # founder-member/shareholder listing, not the director particulars,
@@ -738,10 +665,37 @@ def extract_nnc1(text: str, source: str = "NNC1") -> dict:
     director_blocks = [b for b in blocks if not _SHARES_TAKEN_RE.search(b)]
     directors = [_parse_director_block(b, source) for b in director_blocks]
     # drop blocks that yielded essentially nothing (false-positive label match)
-    directors = [
+    return [
         d for d in directors
         if d["surname_en"]["value"] or d["given_en"]["value"] or d["residential_address"]["value"]
     ]
+
+
+def extract_nnc1(text: str, source: str = "NNC1", pdf_bytes: bytes | None = None) -> dict:
+    text = clean_whitespace(text or "")
+
+    registered_address = _extract_registered_office(text, source)
+
+    # Real PDFs: crop each PI-NNC1 "Protected Information" page by
+    # coordinate rather than regex-matching the flattened text stream —
+    # see pi_nnc1.py for why. Fall back to the legacy text-block parser
+    # when there's no PDF to crop (plain-text fixtures) or it found no
+    # PI-NNC1 pages at all (scanned/OCR'd documents, where the text layer
+    # is reconstructed from OCR word boxes rather than real coordinates,
+    # or older/non-standard NNC1 layouts without this page).
+    directors: list[dict] = []
+    if pdf_bytes:
+        try:
+            directors = extract_directors_from_pdf(pdf_bytes, source)
+        except Exception:
+            logger.warning("coordinate-based PI-NNC1 extraction failed for %s", source, exc_info=True)
+            directors = []
+        directors = [
+            d for d in directors
+            if d["surname_en"]["value"] or d["given_en"]["value"] or d["residential_address"]["value"]
+        ]
+    if not directors:
+        directors = _directors_from_text(text, source)
 
     total_shares = _extract_total_shares(text)
     shareholders = _find_shareholders(text, source)

@@ -854,6 +854,115 @@ def test_pdf_text_dedupes_overprinted_double_text_layer():
     print("test_pdf_text_dedupes_overprinted_double_text_layer OK", r["trading_name"], r["business_address"])
 
 
+def test_pi_nnc1_coordinate_extraction_from_real_pdf_layout():
+    """The director/PI-NNC1 extraction path was rewritten from label-regex-
+    over-flattened-text to coordinate cropping (`app.extraction.pi_nnc1`),
+    calibrated against two real user-supplied NNC1 filings. Those PDFs
+    carry real personal data (names, ID numbers, home addresses) and are
+    deliberately *not* committed here — this fixture instead renders a
+    synthetic page reproducing the real template's row/column layout
+    (same page size, same label/value column x-positions, same ~20pt
+    row spacing measured off the real filings) with placeholder values,
+    so the coordinate-cropping logic itself stays covered by a repeatable
+    test. It also exercises the two conditions that broke the old
+    text-regex approach on the real documents: a genuinely blank Flat/
+    Floor/Block field (must be skipped, not filled with label text) and
+    instructional notes ahead of the real fields that contain "香港身分
+    證"/"通常住址" mid-sentence (must not be mistaken for the field
+    labels themselves)."""
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except ImportError:
+        print("test_pi_nnc1_coordinate_extraction_from_real_pdf_layout SKIPPED (reportlab not installed)")
+        return
+    import os
+    if not os.path.exists(_WQY_FONT_PATH):
+        print("test_pi_nnc1_coordinate_extraction_from_real_pdf_layout SKIPPED (no CJK font at", _WQY_FONT_PATH, ")")
+        return
+
+    from app.extraction.pi_nnc1 import extract_directors_from_pdf
+
+    pdfmetrics.registerFont(TTFont("WQY", _WQY_FONT_PATH))
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("WQY", 9)
+
+    LEFT_X = 72
+    VALUE_X_ID = 285   # name/ID column -- past every label's right edge, short of the HKID row's "( )" checkbox
+    VALUE_X_ADDR = 205  # address column -- past every address label's right edge
+    GAP = 20             # row-to-row spacing, matched to the real filings' PI-NNC1 page
+
+    def lbl(y, text, x=LEFT_X):
+        c.drawString(x, y, text)
+
+    y = 780
+    lbl(y, "PI-NNC1"); y -= 16
+    lbl(y, "首任公司秘書／董事(自然人)- 受保護資料"); y -= 12
+    lbl(y, "First Company Secretary／Director (Natural Person) – Protected Information"); y -= 12
+    lbl(y, "Protected Information"); y -= 12
+    lbl(y, "This page will not be shown on the public record"); y -= 12
+    lbl(y, "- some instructional note mentioning 香港身分證 and 通常住址 mid-sentence"); y -= 12
+    lbl(y, "The full number of Hong Kong Identity Card or passport should be reported"); y -= 20
+    lbl(y, "身分   董事"); lbl(y, "Capacity   Director", x=300); y -= GAP
+
+    lbl(y, "中文姓名"); lbl(y, "測試名字", x=VALUE_X_ID); y -= GAP
+    lbl(y, "Name in Chinese"); y -= GAP
+
+    lbl(y, "英文姓名   姓氏"); lbl(y, "TESTSUR", x=VALUE_X_ID); y -= GAP
+    lbl(y, "Name in English   Surname"); y -= GAP
+    lbl(y, "名字"); lbl(y, "TESTGIVEN", x=VALUE_X_ID); y -= GAP
+    lbl(y, "Other Names"); y -= GAP
+
+    lbl(y, "身分識別"); y -= GAP
+    lbl(y, "(a)香港身分證(完整號碼)"); lbl(y, "無", x=VALUE_X_ID); y -= GAP  # blank HKID cell ("無", not "NIL")
+    lbl(y, "Hong Kong Identity Card (Full Number)"); y -= GAP
+
+    lbl(y, "(b)護照   簽發國家/地區"); lbl(y, "China", x=VALUE_X_ID); y -= GAP
+    lbl(y, "Passport   Issuing Country/Region"); y -= GAP
+    lbl(y, "完整號碼"); lbl(y, "X1234567", x=VALUE_X_ID); y -= GAP
+    lbl(y, "Full Number"); y -= GAP
+
+    lbl(y, "董事的通常住址"); lbl(y, "Usual Residential Address of Director", x=200); y -= GAP
+
+    lbl(y, "室/樓/座等"); y -= GAP  # deliberately blank, like the real Anger Trading/Ornaart filings
+    lbl(y, "Flat/Floor/Block etc."); y -= GAP
+
+    lbl(y, "大廈"); lbl(y, "Test Tower", x=VALUE_X_ADDR); y -= GAP
+    lbl(y, "Building"); y -= GAP
+
+    lbl(y, "街道"); lbl(y, "1 Test Street", x=VALUE_X_ADDR); y -= GAP
+    lbl(y, "Street"); y -= GAP
+
+    lbl(y, "區/市/省"); lbl(y, "Test District, Test City", x=VALUE_X_ADDR); y -= GAP
+    lbl(y, "District/City/Province"); y -= GAP
+
+    lbl(y, "國家"); lbl(y, "Hong Kong", x=VALUE_X_ADDR); y -= GAP
+    lbl(y, "Country")
+    c.save()
+
+    directors = extract_directors_from_pdf(buf.getvalue(), source="NNC1")
+    assert len(directors) == 1, directors
+    d = directors[0]
+
+    assert d["surname_cn"]["value"] == "測", d["surname_cn"]
+    assert d["given_cn"]["value"] == "試名字", d["given_cn"]
+    assert d["surname_en"]["value"] == "TESTSUR", d["surname_en"]
+    assert d["given_en"]["value"] == "TESTGIVEN", d["given_en"]
+    # HKID cell is "無" -> blank -> falls through to the passport number,
+    # not the instructional note's "...Hong Kong Identity Card..." text
+    assert d["id_info"]["value"] == "X1234567", d["id_info"]
+    assert d["id_issuing_country"]["value"] == "China", d["id_issuing_country"]
+    # Flat/Floor/Block genuinely blank -> skipped, not filled with label text
+    assert d["residential_address"]["value"] == (
+        "Test Tower, 1 Test Street, Test District, Test City, Hong Kong"
+    ), d["residential_address"]
+
+    print("test_pi_nnc1_coordinate_extraction_from_real_pdf_layout OK", d)
+
+
 def test_endpoint_smoke():
     """End-to-end smoke test: build tiny PDFs with reportlab and hit /api/extract."""
     try:
@@ -914,5 +1023,6 @@ if __name__ == "__main__":
     test_merge_ubo_dedup_across_nnc1_and_nar1()
     test_pdf_text_layout_reconstruction_real_pdf()
     test_pdf_text_dedupes_overprinted_double_text_layer()
+    test_pi_nnc1_coordinate_extraction_from_real_pdf_layout()
     test_endpoint_smoke()
     print("\nALL TESTS PASSED")

@@ -111,7 +111,7 @@ async def extract(
         if doc.warning:
             warnings.append(f"{filename}: {doc.warning}")
         doc_kind = _classify_nnc1_kind(filename, doc.full_text)
-        parsed = nnc1_rules.extract_nnc1(doc.full_text, source=doc_kind)
+        parsed = nnc1_rules.extract_nnc1(doc.full_text, source=doc_kind, pdf_bytes=data)
         nnc1_sources.append(
             NNC1Source(
                 filename=filename,
