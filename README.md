@@ -12,7 +12,7 @@ app/
   extraction/
     schema.py             字段对象（value/source/status/raw）
     normalize.py           日期归一化、地址推断国家等工具函数
-    pdf_text.py             文字层提取（pdfplumber）+ OCR fallback（pdf2image/pytesseract）
+    pdf_text.py             文字层提取（pdfplumber 逐词坐标重建版面）+ OCR fallback（pdf2image/pytesseract）
     ci.py / br.py / nnc1.py 各文件类型的正则/关键词锚定规则
     romanize.py              中文姓名转拼音兜底（普通话拼音 / 粤语拼音建议）
     merge.py                跨文件合并、默认值、派生字段、冲突检测
@@ -83,6 +83,13 @@ uvicorn app.main:app --reload --port 8000
   证件/地址信息，若该股东同时也是董事，会自动从董事记录回填。无法定位股份
   总数时，相关股东仍会列出但持股比例标记「缺失待补」，不会静默丢弃潜在
   UBO。此逻辑同样是启发式实现，未经真实 NNC1/NAR1 样本校准。
+- **文字层版面重建**：`pdf_text.py` 不使用 pdfplumber 默认的 `extract_text()`
+  （其阅读顺序基于 PDF 内容流的字符绘制顺序，在 PI-NNC1 这类多栏表单上会把
+  标签与填写值错位穿插），而是用 `page.extract_words()` 取得每个词的
+  x0/x1/top 坐标，按 `top` 聚类成行、行内按 `x0` 从左到右排序，行间用换行、
+  同行跨列之间用加宽空白拼接，使"标签 → 右侧/下方值"的空间对应关系保留到
+  输出文本里。OCR 分支同理，用 `pytesseract.image_to_data`（`--psm 6`）取
+  词级坐标做同样的重建（坐标按 OCR_DPI 换算像素->点）。
 - **OCR 依赖系统二进制**：若未安装 `tesseract-ocr` / `poppler`，扫描件文件
   会在结果中带上警告文案，字段按未识别处理，不会导致整个请求失败。
 - 前端所有字段值可编辑；用户手动填写过的「缺失/遮蔽」字段会标记为「人工

@@ -154,10 +154,13 @@ _LABEL_FRAGMENTS = [
     r"NIL",
 ]
 _LABEL_FRAGMENT_ALT = "(?:" + "|".join(_LABEL_FRAGMENTS) + ")"
-# a "value" that is nothing but one or more label fragments (optionally
-# bilingual-paired with / ， ,) is noise, not real content
+# a "value" that is nothing but one or more label fragments — joined by a
+# slash/comma ("身分識別 / Identification"), or by plain whitespace, which
+# is how the pdf_text.py row/column reconstruction joins a bilingual label
+# pair that lands on the same visual row ("身分識別   Identification") — is
+# noise, not real content.
 _LABEL_NOISE_RE = re.compile(
-    r"^\s*" + _LABEL_FRAGMENT_ALT + r"(?:\s*[/／,，]\s*" + _LABEL_FRAGMENT_ALT + r")*\s*$",
+    r"^\s*" + _LABEL_FRAGMENT_ALT + r"(?:[\s/／,，]+" + _LABEL_FRAGMENT_ALT + r")*\s*$",
     re.IGNORECASE,
 )
 # Parenthetical instructional asides ("(Please state the full address in

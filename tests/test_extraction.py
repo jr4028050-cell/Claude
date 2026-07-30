@@ -634,6 +634,101 @@ def test_merge_ubo_dedup_across_nnc1_and_nar1():
     print("test_merge_ubo_dedup_across_nnc1_and_nar1 OK", ubo)
 
 
+_WQY_FONT_PATH = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
+
+
+def test_pdf_text_layout_reconstruction_real_pdf():
+    """Full-pipeline validation with an actually-rendered two-column PDF
+    (real glyph positions, not just sequential text fixtures): a naive
+    label/value regex over pdfplumber's default extract_text() is what
+    produced label text as "director data" in the original bug report.
+    Renders a PI-NNC1-style page with a genuine bilingual (Chinese+English)
+    two-column layout using a real CJK font, runs it through
+    app.extraction.pdf_text.extract_document_text (the rewritten
+    row/column reconstruction) and then app.extraction.nnc1.extract_nnc1
+    unchanged, and checks the three fields called out in the bug report:
+    Chinese name 邱漢城, passport number 440304199501252615 (HKID cell is
+    NIL), and the fully-assembled residential address.
+    """
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except ImportError:
+        print("test_pdf_text_layout_reconstruction_real_pdf SKIPPED (reportlab not installed)")
+        return
+    import os
+    if not os.path.exists(_WQY_FONT_PATH):
+        print("test_pdf_text_layout_reconstruction_real_pdf SKIPPED (no CJK font at", _WQY_FONT_PATH, ")")
+        return
+
+    from app.extraction.pdf_text import extract_document_text
+
+    pdfmetrics.registerFont(TTFont("WQY", _WQY_FONT_PATH))
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.setFont("WQY", 10)
+    LEFT, RIGHT = 40, 320
+
+    def row(y, left_text="", right_text=""):
+        if left_text:
+            c.drawString(LEFT, y, left_text)
+        if right_text:
+            c.drawString(RIGHT, y, right_text)
+
+    y = 760
+    row(y, "PI-NNC1"); y -= 20
+    row(y, "首任公司秘書／董事(自然人)- 受保護資料",
+        "First Company Secretary / Director (Individual) - Protected Information"); y -= 30
+    row(y, "中文姓名", "Name in Chinese"); y -= 18
+    row(y, "邱漢城"); y -= 30
+    row(y, "英文姓名", "Name in English"); y -= 18
+    row(y, "姓氏", "Surname"); y -= 18
+    y -= 18  # Surname value left blank
+    row(y, "名字", "Other Names"); y -= 18
+    y -= 30  # Other Names value left blank
+    row(y, "身分識別", "Identification"); y -= 18
+    row(y, "香港身份證號碼", "Hong Kong Identity Card No."); y -= 18
+    row(y, "NIL"); y -= 24
+    row(y, "護照", "Passport"); y -= 18
+    row(y, "完整號碼", "Full Number"); y -= 18
+    row(y, "440304199501252615"); y -= 18
+    row(y, "簽發國家/地區", "Issuing Country"); y -= 18
+    row(y, "China"); y -= 30
+    row(y, "董事的通常住址", "Usual Residential Address of Director"); y -= 18
+    row(y, "室/樓/座", "Flat/Floor/Block"); y -= 18
+    row(y, "D2205"); y -= 18
+    row(y, "大廈", "Building"); y -= 18
+    row(y, "TIANRENJU DISTRICT 1"); y -= 18
+    row(y, "街道", "Street"); y -= 18
+    row(y, "NO. 1 JINGTIAN NORTH STREET"); y -= 18
+    row(y, "地區/市/省", "District/City/Province"); y -= 18
+    row(y, "FUTIAN DISTRICT, SHENZHEN CITY, GUANGDONG PROVINCE"); y -= 18
+    row(y, "國家", "Country"); y -= 18
+    row(y, "China")
+    c.save()
+
+    doc = extract_document_text("PI_NNC1.pdf", buf.getvalue())
+    result = nnc1_rules.extract_nnc1(doc.full_text, source="NNC1")
+    assert len(result["directors"]) == 1, result["directors"]
+    d = result["directors"][0]
+
+    assert d["surname_cn"]["value"] == "邱", d["surname_cn"]
+    assert d["given_cn"]["value"] == "漢城", d["given_cn"]
+    assert d["id_info"]["value"] == "440304199501252615", d["id_info"]  # not "NIL"
+    assert d["id_issuing_country"]["value"] == "China", d["id_issuing_country"]
+    assert d["residential_address"]["value"] == (
+        "D2205, TIANRENJU DISTRICT 1, NO. 1 JINGTIAN NORTH STREET, "
+        "FUTIAN DISTRICT, SHENZHEN CITY, GUANGDONG PROVINCE, China"
+    ), d["residential_address"]
+    # both English name fields genuinely blank -> Mandarin pinyin fallback
+    # (China passport), proving no stray label text leaked in as a value
+    assert d["surname_en"]["value"] == "Qiu" and d["surname_en"]["status"] == "inferred", d["surname_en"]
+    assert d["given_en"]["value"] == "Hancheng", d["given_en"]
+
+    print("test_pdf_text_layout_reconstruction_real_pdf OK", d)
+
+
 def test_endpoint_smoke():
     """End-to-end smoke test: build tiny PDFs with reportlab and hit /api/extract."""
     try:
@@ -691,5 +786,6 @@ if __name__ == "__main__":
     test_normalize_date_variants()
     test_merge()
     test_merge_ubo_dedup_across_nnc1_and_nar1()
+    test_pdf_text_layout_reconstruction_real_pdf()
     test_endpoint_smoke()
     print("\nALL TESTS PASSED")
