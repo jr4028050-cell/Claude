@@ -805,6 +805,55 @@ def test_pdf_text_layout_reconstruction_real_pdf():
     print("test_pdf_text_layout_reconstruction_real_pdf OK", d)
 
 
+def test_pdf_text_dedupes_overprinted_double_text_layer():
+    """Real bug report: an "Anger Trading" BR PDF embeds its text layer
+    twice at coincident coordinates (a reprint/overprint artifact), so
+    pdfplumber's default word extraction reads the two overlapping copies
+    interleaved and doubles every character ("FLAT" -> "FFLLAATT",
+    "ANGER" -> "AANNGGEERR"). Renders a BR-style page the same way (each
+    line's text drawn twice at the identical x/y) and checks that
+    app.extraction.pdf_text's coordinate-based char dedup collapses it
+    back to single characters before br.py ever sees the text, and that
+    the addr/trading-name fields come out clean, not doubled."""
+    try:
+        from reportlab.pdfgen import canvas
+    except ImportError:
+        print("test_pdf_text_dedupes_overprinted_double_text_layer SKIPPED (reportlab not installed)")
+        return
+
+    from app.extraction.pdf_text import extract_document_text
+    from app.extraction import br as br_rules
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.setFont("Helvetica", 10)
+    lines = [
+        (760, "Name of Business"),
+        (740, "ANGER TRADING CO.,LIMITED"),
+        (700, "Business Address"),
+        (680, "FLAT 2304, 23/F, HO KING COMMERCIAL CENTRE,"),
+        (660, "2-16 FA YUEN STREET, MONG KOK, HONG KONG"),
+        (620, "Nature of Business"),
+        (600, "IMPORT AND EXPORT TRADING"),
+    ]
+    for y, text in lines:
+        c.drawString(40, y, text)
+        c.drawString(40, y, text)  # overprint: same text, same position
+    c.save()
+
+    doc = extract_document_text("BR.pdf", buf.getvalue())
+    assert "AANNGGEERR" not in doc.full_text, doc.full_text  # dedup must run before anything else sees the text
+    assert "FFLLAATT" not in doc.full_text, doc.full_text
+
+    r = br_rules.extract_br(doc.full_text)
+    assert r["trading_name"]["value"] == "ANGER TRADING CO.,LIMITED", r["trading_name"]
+    assert r["business_address"]["value"] == (
+        "FLAT 2304, 23/F, HO KING COMMERCIAL CENTRE, 2-16 FA YUEN STREET, MONG KOK, HONG KONG"
+    ), r["business_address"]
+    assert r["nature_of_business"]["value"] == "IMPORT AND EXPORT TRADING", r["nature_of_business"]
+    print("test_pdf_text_dedupes_overprinted_double_text_layer OK", r["trading_name"], r["business_address"])
+
+
 def test_endpoint_smoke():
     """End-to-end smoke test: build tiny PDFs with reportlab and hit /api/extract."""
     try:
@@ -864,5 +913,6 @@ if __name__ == "__main__":
     test_merge()
     test_merge_ubo_dedup_across_nnc1_and_nar1()
     test_pdf_text_layout_reconstruction_real_pdf()
+    test_pdf_text_dedupes_overprinted_double_text_layer()
     test_endpoint_smoke()
     print("\nALL TESTS PASSED")

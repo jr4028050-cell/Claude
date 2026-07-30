@@ -14,6 +14,10 @@ it. If a PDF's text layer is too thin (scanned/image-only), we fall back
 to rendering pages to images and running Tesseract OCR with the
 Traditional Chinese + English language pack, per PRD 第 7 节, using the
 same row/column reconstruction on OCR's word-level bounding boxes.
+Before any of that, each page's characters are also deduped by
+coordinate (`page.dedupe_chars`) to undo overprinted double text layers
+that some reprinted/scanned BR forms embed, which otherwise show up as
+every character doubled ("FLAT" -> "FFLLAATT").
 """
 from __future__ import annotations
 
@@ -93,6 +97,16 @@ def _words_to_layout_text(
 
 
 def _reconstruct_page_text(page) -> str:
+    # Some scanned-then-reprinted BR/CI forms embed their text layer twice,
+    # character-for-character, at (near-)identical coordinates -- pdfplumber
+    # then reads the two overlapping layers' chars interleaved, doubling
+    # every character ("FLAT" -> "FFLLAATT"). Collapse chars that share
+    # text/font/size and sit within 1pt of another char's position down to
+    # one before doing anything else; genuine same-page duplicate letters
+    # (e.g. "KOMM") sit at *different* x/y positions and are untouched,
+    # since this is a coordinate check, not a text-pattern one.
+    page = page.dedupe_chars(tolerance=1)
+
     # x_tolerance=3, not the tighter pdfplumber default: CJK glyphs are
     # often kerned 2-3pt apart even within one word/phrase, so a tolerance
     # of ~2 or less splits every Chinese phrase into one "word" per
